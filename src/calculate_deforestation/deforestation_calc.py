@@ -89,11 +89,3 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
         log_file.writelines('\n'.join(log_lines))
 
     print("📄 Log guardado en:", log_path)
-
-    
-deforestation_step_1(
-    input_folder= r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_spatial_procesing",
-    output_folder=r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_calc_deforestation",
-    source='SMBYC'  # o 'OTRA', si usas otro origen
-    # deforestation_value=9  # Solo si source no es SMBYC
-)

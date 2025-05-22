@@ -1,9 +1,8 @@
 import os
-import sys
-import shutil
 from glob import glob
 from tools import GeoserverClient
 from zipfile import ZipFile
+from config import config
 
 def create_mosaic_zip(source_folder, properties_folder, output_zip):
     # Archivos que se incluirán
@@ -34,17 +33,17 @@ def create_mosaic_zip(source_folder, properties_folder, output_zip):
     print(f"Contenido del ZIP: {files_to_zip}")
 
 # Configuración
-folder_root = "D://OneDrive - CGIAR/Desktop/ganabosques/import_mosaic/aclimate_scripts_tools/geoserver/upload_mosaics"
+folder_root = config['WORKSPACE']
 folder_data = os.path.join(folder_root, "data")
 folder_layers = os.path.join(folder_data, "layers")
 folder_properties = os.path.join(folder_data, "properties")
 folder_tmp = os.path.join(folder_data, "tmp")
 output_zip_path = os.path.join(folder_root, "mosaic.zip")
 
-geo_url = "http://localhost:8080/geoserver/rest/"
-geo_user = os.environ['GEO_USER']
-geo_pwd = os.environ['GEO_PWD']
-workspace_name = os.environ['GEO_WORKSPACE']
+geo_url = config['URL_GEO']
+geo_user = config['GEO_USER']
+geo_pwd = config['GEO_PWD']
+workspace_name = config['GEO_WORKSPACE']
 
 stores_aclimate = [os.path.basename(x) for x in glob(os.path.join(folder_layers, "*"))]
 print(f"Stores to process: {stores_aclimate}")

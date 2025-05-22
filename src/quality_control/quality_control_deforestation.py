@@ -62,7 +62,3 @@ def quality_control(input_dir, output_dir):
         log_file.write("\nResumen:\n")
         log_file.write(f"Total procesados correctamente: {procesados}\n")
         log_file.write(f"Total con errores o vacíos: {errores}\n")
-
-
-quality_control(input_dir=  r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_get_data_deforestation",
-                output_dir=  r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_quality_control")

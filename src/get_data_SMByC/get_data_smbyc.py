@@ -33,12 +33,3 @@ def get_data(years, output_path, geo, workspace, mosaic):
             logging.error(f"Timeout para el año {year}.")
         except requests.exceptions.RequestException as e:
             logging.error(f"Error en la solicitud para {year}: {e}")
-
-# Ejemplo de uso
-get_data(
-    years=[2012,2013,2014,2015,2016],
-    output_path=r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_get_data_deforestation",
-    geo='http://localhost:8600/geoserver',
-    workspace='deforestation',
-    mosaic='smbyc_test'
-)
