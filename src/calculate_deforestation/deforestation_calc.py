@@ -9,6 +9,10 @@ from rasterio.windows import Window
 from rasterio.enums import Resampling
 import numpy as np
 from datetime import datetime
+import logging
+from tools.log_print import log_print  # Asegúrate que esta ruta esté bien
+
+logger = logging.getLogger(__name__)
 
 def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestation_value=None):
     os.makedirs(output_folder, exist_ok=True)
@@ -17,9 +21,12 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_lines.append(f"--- LOG PARTE 1: CARGA Y FILTRADO ---\nInicio: {timestamp}\n")
 
+    log_print(logger, "Iniciando cálculo de deforestación...")
+
     if source != 'SMBYC' and deforestation_value is None:
         error_msg = "ERROR: Si la fuente no es 'SMBYC', debes especificar 'deforestation_value'."
         log_lines.append(error_msg)
+        log_print(logger, error_msg, level='error')
         with open(log_path, 'w') as log_file:
             log_file.writelines('\n'.join(log_lines))
         raise ValueError(error_msg)
@@ -29,11 +36,18 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
     processed_layers = []
     years = []
 
+    if not tif_files:
+        msg = "No se encontraron archivos .tif en el directorio de entrada."
+        log_print(logger, msg, level='warning')
+        log_lines.append(msg)
+
     for tif in tif_files:
         input_path = os.path.join(input_folder, tif)
         year = ''.join(filter(str.isdigit, tif))
         output_filename = f"{source.lower()}_deforestation_annual_{year}.tif"
         output_path = os.path.join(output_folder, f"{source.lower()}_deforestation_annual", output_filename)
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         try:
             with rasterio.open(input_path) as src:
@@ -53,13 +67,17 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
 
                 processed_layers.append(output_path)
                 years.append(int(year))
-                log_lines.append(f"{tif} procesado correctamente como {output_filename}.")
+                msg = f"{tif} procesado correctamente como {output_filename}."
+                log_lines.append(msg)
+                log_print(logger, msg)
 
         except Exception as e:
-            log_lines.append(f"ERROR procesando {tif}: {str(e)}")
+            msg = f"ERROR procesando {tif}: {str(e)}"
+            log_lines.append(msg)
+            log_print(logger, msg, level='error')
 
     # Acumulado
-    if len(processed_layers) >= 1:
+    if processed_layers:
         try:
             with rasterio.open(processed_layers[0]) as ref:
                 profile = ref.profile
@@ -67,9 +85,11 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
                 cum_filename = f"{source.lower()}_deforestation_cumulative_{max(years)}.tif"
                 cum_path = os.path.join(output_folder,f"{source.lower()}_deforestation_cumulative" ,cum_filename)
 
+                os.makedirs(os.path.dirname(cum_path), exist_ok=True)
+
                 with rasterio.open(cum_path, 'w', **profile) as dst:
                     for ji, window in ref.block_windows(1):
-                        cumulative = np.zeros(window.height * window.width, dtype='int32').reshape((window.height, window.width))
+                        cumulative = np.zeros((window.height, window.width), dtype='int32')
 
                         for layer_path in processed_layers:
                             with rasterio.open(layer_path) as lyr:
@@ -78,14 +98,21 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
 
                         dst.write(cumulative, 1, window=window)
 
-                log_lines.append(f"Raster acumulado guardado como {cum_filename}.")
+                msg = f"Raster acumulado guardado como {cum_filename}."
+                log_lines.append(msg)
+                log_print(logger, msg)
+
         except Exception as e:
-            log_lines.append(f"ERROR generando acumulado: {str(e)}")
+            msg = f"ERROR generando acumulado: {str(e)}"
+            log_lines.append(msg)
+            log_print(logger, msg, level='error')
     else:
-        log_lines.append("No se generó acumulado porque no se procesaron capas correctamente.")
+        msg = "No se generó acumulado porque no se procesaron capas correctamente."
+        log_lines.append(msg)
+        log_print(logger, msg, level='warning')
 
     log_lines.append(f"\nFin del procesamiento: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     with open(log_path, 'w') as log_file:
         log_file.writelines('\n'.join(log_lines))
 
-    print("📄 Log guardado en:", log_path)
+    log_print(logger, f"Log guardado en: {log_path}")

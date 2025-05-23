@@ -4,6 +4,10 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.windows import from_bounds
 import numpy as np
 import traceback
+import logging
+from tools.log_print import log_print  # Asegúrate de que esta ruta sea correcta
+
+logger = logging.getLogger(__name__)
 
 def resoluciones_iguales(res1, res2, tol=1e-6):
     return abs(res1[0] - res2[0]) < tol and abs(res1[1] - res2[1]) < tol
@@ -13,6 +17,8 @@ def mdl_spatial_processing(input_folder, output_folder):
     log_path = os.path.join(output_folder, 'log_procesamiento.txt')
 
     try:
+        log_print(logger, f"Iniciando procesamiento espacial en: {input_folder}")
+
         # Raster de referencia
         xmin_fixed = -79.22432089079678
         ymin_fixed = -3.413815939872096
@@ -24,7 +30,12 @@ def mdl_spatial_processing(input_folder, output_folder):
         tif_files = [f for f in os.listdir(input_folder) if f.endswith('.tif')]
         tif_files.sort()
 
+        if not tif_files:
+            log_print(logger, "No se encontraron archivos .tif para procesar.", level='warning')
+            return False
+
         for file in tif_files:
+            log_print(logger, f"Procesando archivo: {file}")
             input_path = os.path.join(input_folder, file)
             output_path = os.path.join(output_folder, file)
 
@@ -70,7 +81,7 @@ def mdl_spatial_processing(input_folder, output_folder):
                         for i in range(1, src.count + 1):
                             dst.write(src.read(i), i)
 
-            # Recorte con window y guardar archivo final comprimido
+            # Recorte con window y guardar archivo final
             with rio.open(temp_path) as src:
                 window = from_bounds(xmin_fixed, ymin_fixed, xmax_fixed, ymax_fixed, src.transform)
                 data = src.read(1, window=window)
@@ -88,19 +99,21 @@ def mdl_spatial_processing(input_folder, output_folder):
                     dst.write(data, 1)
 
             os.remove(temp_path)
-            print(f"Procesado: {file}")
+            log_print(logger, f"Archivo procesado correctamente: {file}")
 
         with open(log_path, 'w') as log_file:
             log_file.write("El código ha corrido perfectamente.\n")
             log_file.write(f"{len(tif_files)} archivos procesados correctamente.\n")
+
+        log_print(logger, f"{len(tif_files)} archivos procesados correctamente.")
+        return True
 
     except Exception:
         error_msg = traceback.format_exc()
         with open(log_path, 'w') as log_file:
             log_file.write("Ha ocurrido un error durante el procesamiento:\n")
             log_file.write(error_msg)
-        print("Error durante el procesamiento. Revisa el log.")
 
-# Ejecutar la función
-mdl_spatial_processing(input_folder= r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_quality_control",
-                         output_folder= r"D:\OneDrive - CGIAR\Desktop\ganabosques\deforestacion\outputs\tmp_spatial_procesing")
+        log_print(logger, "Ha ocurrido un error durante el procesamiento. Revisa el log.", level='error')
+        logger.error(error_msg)  # Se guarda el traceback completo en el log
+        return False

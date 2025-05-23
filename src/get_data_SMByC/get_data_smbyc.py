@@ -1,9 +1,10 @@
 import requests
 import logging
 import os
+from tools.log_print import log_print  # Asegúrate que la ruta sea correcta
 
-# Configuración del log
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configuración del logger del módulo
+logger = logging.getLogger("get data")
 
 def get_data(years, output_path, geo, workspace, mosaic):
     # Crear carpeta si no existe
@@ -18,18 +19,22 @@ def get_data(years, output_path, geo, workspace, mosaic):
             f'&subset=Time("{year}-01-01T00:00:00.000Z")'
         )
 
-        logging.info(f"Enviando solicitud GET para el año {year} a: {url}")
+        log_print(logger, f"Enviando solicitud GET para el año {year} a:\n{url}")
 
         try:
             response = requests.get(url, timeout=60)
             if response.status_code == 200:
-                output_file = os.path.join(output_path, f"smbyc_{year}.tif")  # Aquí el cambio solicitado
+                output_file = os.path.join(output_path, f"smbyc_{year}.tif")
                 with open(output_file, "wb") as f:
                     f.write(response.content)
-                logging.info(f"Archivo guardado exitosamente: {output_file}")
+                log_print(logger, f"Archivo guardado exitosamente: {output_file}")
             else:
-                logging.error(f"Error en la respuesta para {year}: {response.status_code} - {response.text}")
+                log_print(
+                    logger,
+                    f"Error en la respuesta para {year}: {response.status_code} - {response.text}",
+                    level="error"
+                )
         except requests.exceptions.Timeout:
-            logging.error(f"Timeout para el año {year}.")
+            log_print(logger, f"Timeout para el año {year}.", level="error")
         except requests.exceptions.RequestException as e:
-            logging.error(f"Error en la solicitud para {year}: {e}")
+            log_print(logger, f"Error en la solicitud para {year}: {e}", level="error")
