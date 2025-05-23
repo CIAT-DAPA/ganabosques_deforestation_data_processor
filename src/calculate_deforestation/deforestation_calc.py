@@ -32,7 +32,7 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
     for tif in tif_files:
         input_path = os.path.join(input_folder, tif)
         year = ''.join(filter(str.isdigit, tif))
-        output_filename = f"{source.lower()}_{year}.tif"
+        output_filename = f"{source.lower()}_deforestation_annual_{year}.tif"
         output_path = os.path.join(output_folder, output_filename)
 
         try:
@@ -64,7 +64,7 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
             with rasterio.open(processed_layers[0]) as ref:
                 profile = ref.profile
                 profile.update(dtype='int32', nodata=-99999, compress='lzw')
-                cum_filename = f"deforestation_cum_{min(years)}_{max(years)}.tif"
+                cum_filename = f"{source.lower()}_deforestation_cumulative_{max(years)}.tif"
                 cum_path = os.path.join(output_folder, cum_filename)
 
                 with rasterio.open(cum_path, 'w', **profile) as dst:
