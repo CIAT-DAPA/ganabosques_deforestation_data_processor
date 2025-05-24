@@ -69,7 +69,7 @@ def main(years):
         log_print(logger, "Paso 5: Guardar resultados...")
         process_geoserver_mosaics(output_path_deforestation)
 
-        log_print(logger, "Proceso finalizado correctamente.")
+        log_print(logger, "Proceso finalizado.")
 
     except Exception as e:
         log_print(logger, f"Error general en el proceso: {e}", level="error")

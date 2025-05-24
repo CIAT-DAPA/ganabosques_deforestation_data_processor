@@ -11,6 +11,8 @@ config['WORKSPACE'] = os.getenv('WORKSPACE')
 config['GEO_USER'] = os.getenv("GEO_USER")
 config['GEO_PWD'] = os.getenv("GEO_PWD")
 config['GEO_WORKSPACE'] = os.getenv("GEO_WORKSPACE")
+config['MONGO_DB_NAME'] = os.getenv("MONGO_DB_NAME")
+config['MONGO_URI'] = os.getenv("MONGO_URI")
 
 config['STORES'] = {
     'raw': 'smbyc',
