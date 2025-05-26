@@ -28,3 +28,4 @@ urllib3==2.4.0
 xarray==2025.4.0
 xmltodict==0.14.2
 git+https://github.com/dimitri-justeau/gsconfig-py3@master
+git+https://github.com/CIAT-DAPA/ganabosques_orm
