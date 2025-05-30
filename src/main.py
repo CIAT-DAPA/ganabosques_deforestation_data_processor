@@ -26,10 +26,10 @@ def main(years):
 
         # Parámetros generales
         base_path = config['WORKSPACE']
-        output_path_get_data = os.path.join(base_path, "deforestacion", "outputs", "tmp_get_data_deforestation")
-        output_path_quality = os.path.join(base_path, "deforestacion", "outputs", "tmp_quality_control")
-        output_path_spatial = os.path.join(base_path, "deforestacion", "outputs", "tmp_spatial_procesing")
-        output_path_deforestation = os.path.join(base_path, "deforestacion", "outputs", "tmp_calc_deforestation")
+        output_path_get_data = os.path.join(base_path, "deforestacion", "outputs", "01_tmp_get_data_deforestation")
+        output_path_quality = os.path.join(base_path, "deforestacion", "outputs", "02_tmp_quality_control")
+        output_path_spatial = os.path.join(base_path, "deforestacion", "outputs", "03_tmp_spatial_procesing")
+        output_path_deforestation = os.path.join(base_path, "deforestacion", "outputs", "04_tmp_calc_deforestation")
 
         # Paso 1: Obtener datos
         log_print(logger, "Paso 1: Obtener datos...")

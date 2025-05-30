@@ -76,31 +76,35 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
             log_lines.append(msg)
             log_print(logger, msg, level='error')
 
-    # Acumulado
+    # Acumulado progresivo por año
     if processed_layers:
         try:
-            with rasterio.open(processed_layers[0]) as ref:
-                profile = ref.profile
-                profile.update(dtype='int32', nodata=-99999, compress='lzw')
-                cum_filename = f"{source.lower()}_deforestation_cumulative_{max(years)}.tif"
-                cum_path = os.path.join(output_folder,f"{source.lower()}_deforestation_cumulative" ,cum_filename)
+            sorted_years_layers = sorted(zip(years, processed_layers))
+            cumulative_sum = None
 
-                os.makedirs(os.path.dirname(cum_path), exist_ok=True)
+            for idx, (year, layer_path) in enumerate(sorted_years_layers):
+                with rasterio.open(layer_path) as src:
+                    profile = src.profile
+                    profile.update(dtype='int32', nodata=-99999, compress='lzw')
+                    data = src.read(1)
 
-                with rasterio.open(cum_path, 'w', **profile) as dst:
-                    for ji, window in ref.block_windows(1):
-                        cumulative = np.zeros((window.height, window.width), dtype='int32')
+                    if cumulative_sum is None:
+                        cumulative_sum = np.zeros_like(data, dtype='int32')
 
-                        for layer_path in processed_layers:
-                            with rasterio.open(layer_path) as lyr:
-                                data = lyr.read(1, window=window)
-                                cumulative += data
+                    cumulative_sum += data
 
-                        dst.write(cumulative, 1, window=window)
+                    # A partir del segundo año, guardar archivo acumulado
+                    if idx >= 1:
+                        cum_filename = f"{source.lower()}_deforestation_cumulative_{year}.tif"
+                        cum_path = os.path.join(output_folder, f"{source.lower()}_deforestation_cumulative", cum_filename)
+                        os.makedirs(os.path.dirname(cum_path), exist_ok=True)
 
-                msg = f"Raster acumulado guardado como {cum_filename}."
-                log_lines.append(msg)
-                log_print(logger, msg)
+                        with rasterio.open(cum_path, 'w', **profile) as dst:
+                            dst.write(cumulative_sum, 1)
+
+                        msg = f"Raster acumulado hasta {year} guardado como {cum_filename}."
+                        log_lines.append(msg)
+                        log_print(logger, msg)
 
         except Exception as e:
             msg = f"ERROR generando acumulado: {str(e)}"
