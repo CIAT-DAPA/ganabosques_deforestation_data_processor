@@ -24,6 +24,7 @@ requests==2.32.3
 rioxarray==0.19.0
 six==1.17.0
 tzdata==2025.2
+tqdm==4.67.1
 urllib3==2.4.0
 xarray==2025.4.0
 xmltodict==0.14.2
