@@ -5,6 +5,7 @@ from rasterio.windows import from_bounds
 import numpy as np
 import traceback
 import logging
+from tqdm import tqdm  # Barra de progreso
 from tools.log_print import log_print  # Asegúrate de que esta ruta sea correcta
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def mdl_spatial_processing(input_folder, output_folder):
             log_print(logger, "No se encontraron archivos .tif para procesar.", level='warning')
             return False
 
-        for file in tif_files:
+        for file in tqdm(tif_files, desc="Procesando archivos", unit="archivo"):
             log_print(logger, f"Procesando archivo: {file}")
             input_path = os.path.join(input_folder, file)
             output_path = os.path.join(output_folder, file)
@@ -115,5 +116,6 @@ def mdl_spatial_processing(input_folder, output_folder):
             log_file.write(error_msg)
 
         log_print(logger, "Ha ocurrido un error durante el procesamiento. Revisa el log.", level='error')
-        logger.error(error_msg)  # Se guarda el traceback completo en el log
+        logger.error(error_msg)
         return False
+    

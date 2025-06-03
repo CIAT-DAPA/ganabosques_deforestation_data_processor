@@ -1,6 +1,6 @@
 ####################################
-########## Brayan Mora A. ########## 
-##########  5/02/2025     ##########
+########## Brayan Mora A. ##########
+##########    5/02/2025    ##########
 ####################################
 
 import os
@@ -10,6 +10,7 @@ from rasterio.enums import Resampling
 import numpy as np
 from datetime import datetime
 import logging
+from tqdm import tqdm  
 from tools.log_print import log_print  # Asegúrate que esta ruta esté bien
 
 logger = logging.getLogger(__name__)
@@ -41,10 +42,12 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
         log_print(logger, msg, level='warning')
         log_lines.append(msg)
 
-    for tif in tif_files:
+    # PROCESAMIENTO ANUAL CON BARRA DE PROGRESO
+    for tif in tqdm(tif_files, desc="Procesando deforestación anual", unit="archivo"):
         input_path = os.path.join(input_folder, tif)
-        year = ''.join(filter(str.isdigit, tif))
-        output_filename = f"{source.lower()}_deforestation_annual_{year}.tif"
+        year_str = ''.join(filter(str.isdigit, tif))
+        year = int(year_str)
+        output_filename = f"{source.lower()}_deforestation_annual_{year}-{year + 1}.tif"
         output_path = os.path.join(output_folder, f"{source.lower()}_deforestation_annual", output_filename)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -66,7 +69,7 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
                         dst.write(filtered.astype('int32'), 1, window=window)
 
                 processed_layers.append(output_path)
-                years.append(int(year))
+                years.append(year)
                 msg = f"{tif} procesado correctamente como {output_filename}."
                 log_lines.append(msg)
                 log_print(logger, msg)
@@ -76,13 +79,13 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
             log_lines.append(msg)
             log_print(logger, msg, level='error')
 
-    # Acumulado progresivo por año
+    # ACUMULADO PROGRESIVO CON BARRA DE PROGRESO
     if processed_layers:
         try:
             sorted_years_layers = sorted(zip(years, processed_layers))
             cumulative_sum = None
 
-            for idx, (year, layer_path) in enumerate(sorted_years_layers):
+            for idx, (year, layer_path) in enumerate(tqdm(sorted_years_layers, desc="Generando acumulado", unit="año")):
                 with rasterio.open(layer_path) as src:
                     profile = src.profile
                     profile.update(dtype='int32', nodata=-99999, compress='lzw')
@@ -93,7 +96,6 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
 
                     cumulative_sum += data
 
-                    # A partir del segundo año, guardar archivo acumulado
                     if idx >= 1:
                         cum_filename = f"{source.lower()}_deforestation_cumulative_{year}.tif"
                         cum_path = os.path.join(output_folder, f"{source.lower()}_deforestation_cumulative", cum_filename)
