@@ -12,10 +12,11 @@ from datetime import datetime
 import logging
 from tqdm import tqdm  
 from tools.log_print import log_print  # Asegúrate que esta ruta esté bien
+from ganabosques_orm.enums.deforestationsource import DeforestationSource
 
 logger = logging.getLogger(__name__)
 
-def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestation_value=None):
+def deforestation_step_1(input_folder, output_folder, source, deforestation_value=None):
     os.makedirs(output_folder, exist_ok=True)
     log_path = os.path.join(output_folder, 'log_parte1.txt')
     log_lines = []
@@ -24,15 +25,15 @@ def deforestation_step_1(input_folder, output_folder, source='SMBYC', deforestat
 
     log_print(logger, "Iniciando cálculo de deforestación...")
 
-    if source != 'SMBYC' and deforestation_value is None:
-        error_msg = "ERROR: Si la fuente no es 'SMBYC', debes especificar 'deforestation_value'."
+    if source != DeforestationSource.SMBYC.value and deforestation_value is None:
+        error_msg = f"ERROR: Si la fuente no es '{DeforestationSource.SMBYC.value}', debes especificar 'deforestation_value'."
         log_lines.append(error_msg)
         log_print(logger, error_msg, level='error')
         with open(log_path, 'w') as log_file:
             log_file.writelines('\n'.join(log_lines))
         raise ValueError(error_msg)
 
-    value_to_filter = 2 if source == 'SMBYC' else deforestation_value
+    value_to_filter = 2 if source == DeforestationSource.SMBYC.value else deforestation_value
     tif_files = sorted([f for f in os.listdir(input_folder) if f.endswith('.tif')])
     processed_layers = []
     years = []

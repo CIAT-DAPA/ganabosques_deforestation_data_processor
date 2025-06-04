@@ -7,6 +7,7 @@ import traceback
 import logging
 from tqdm import tqdm  # Barra de progreso
 from tools.log_print import log_print  # Asegúrate de que esta ruta sea correcta
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +22,12 @@ def mdl_spatial_processing(input_folder, output_folder):
         log_print(logger, f"Iniciando procesamiento espacial en: {input_folder}")
 
         # Raster de referencia
-        xmin_fixed = -79.22432089079678
-        ymin_fixed = -3.413815939872096
-        xmax_fixed = -66.65584054291094
-        ymax_fixed = 12.580743905000004
-        res_ref = (0.000273037894245, 0.000273037894245)
-        dst_crs = 'EPSG:4326'
+        xmin_fixed = config["SPATIAL_PARAMETERS"]["xmin_ref"]
+        ymin_fixed = config["SPATIAL_PARAMETERS"]["ymin_ref"]
+        xmax_fixed = config["SPATIAL_PARAMETERS"]["xmax_ref"]
+        ymax_fixed = config["SPATIAL_PARAMETERS"]["ymax_ref"]
+        res_ref = config["SPATIAL_PARAMETERS"]["res_ref"]
+        dst_crs = config["SPATIAL_PARAMETERS"]["dst_crs_ref"]
 
         tif_files = [f for f in os.listdir(input_folder) if f.endswith('.tif')]
         tif_files.sort()

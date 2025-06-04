@@ -26,5 +26,14 @@ config['NAMING_PATTERNS'] = {
     'cumulative': 'smbyc_deforestation_cumulative_{year}.tiff',
 }
 
+config["SPATIAL_PARAMETERS"]= {
+    'xmin_ref': -79.22432089079678,
+    'ymin_ref':-3.413815939872096,
+    'xmax_ref': -66.65584054291094,
+    'ymax_ref': 12.580743905000004,
+    'res_ref' : (0.000273037894245, 0.000273037894245),
+    'dst_crs_ref' : 'EPSG:4326',
+}
+
 if __name__ == "__main__":
     print(config)

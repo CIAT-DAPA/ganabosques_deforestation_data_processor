@@ -2,6 +2,7 @@ import requests
 import logging
 import os
 from tools.log_print import log_print  # Asegúrate que la ruta sea correcta
+from ganabosques_orm.enums.ugg import UGG
 
 # Configuración del logger del módulo
 logger = logging.getLogger("get data")
@@ -24,7 +25,7 @@ def get_data(years, output_path, geo, workspace, mosaic):
         try:
             response = requests.get(url, timeout=60)
             if response.status_code == 200:
-                output_file = os.path.join(output_path, f"smbyc_{year}.tif")
+                output_file = os.path.join(output_path, f"{mosaic}_{year}.tif")
                 with open(output_file, "wb") as f:
                     f.write(response.content)
                 log_print(logger, f"Archivo guardado exitosamente: {output_file}")
