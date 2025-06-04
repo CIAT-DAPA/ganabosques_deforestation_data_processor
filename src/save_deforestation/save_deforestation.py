@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urljoin
 from glob import glob
 from tools.GeoserverClient import GeoserverClient
 from config import config
@@ -15,8 +16,7 @@ import logging
 # Configuración del logger de este script
 logger = logging.getLogger("importador_mosaicos")
 
-
-def process_geoserver_mosaics( folder_root ):
+def process_geoserver_mosaics( folder_root, source ):
     # Rutas basadas en la variable WORKSPACE del .env
     folder_layers = folder_root
     
@@ -30,7 +30,7 @@ def process_geoserver_mosaics( folder_root ):
     output_zip_path = os.path.join(folder_root, "mosaic.zip")
 
     # Configuración de conexión
-    geo_url = config["URL_GEO"].rstrip("/") + "/rest/"
+    geo_url = urljoin(config["URL_GEO"], "rest/")
     geo_user = config["GEO_USER"]
     geo_pwd = config["GEO_PWD"]
     workspace_name = config["GEO_WORKSPACE"]
@@ -77,11 +77,12 @@ def process_geoserver_mosaics( folder_root ):
 
             except Exception as geo_err:
                 log_print(logger, f"Error al crear/actualizar mosaico '{current_store}': {geo_err}", level="error")
+                continue
 
             if mosaic_success:
                 # Determinar tipo de deforestación y ruta
                 deforestation_type = (
-                    DeforestationType.ANNUAL if "annual" in current_store.lower()
+                    DeforestationType.ANNUAL if DeforestationType.ANNUAL in current_store.lower()
                     else DeforestationType.CUMULATIVE
                 )
                 server_store_path = f"{workspace_name}/{current_store}/"
@@ -105,7 +106,7 @@ def process_geoserver_mosaics( folder_root ):
                             # Buscar los .tif anuales disponibles
                             all_annual_years = []
                             for name in os.listdir(folder_layers):
-                                if "annual" in name.lower():
+                                if DeforestationType.ANNUAL in name.lower():
                                     annual_folder = os.path.join(folder_layers, name)
                                     annual_tifs = [
                                         int(''.join(filter(str.isdigit, t)))
@@ -124,7 +125,7 @@ def process_geoserver_mosaics( folder_root ):
                             year_start=year_start,
                             year_end=year_end,
                             deforestation_type=deforestation_type,
-                            deforestation_source=DeforestationSource.SMBYC
+                            deforestation_source=DeforestationSource(source)
                         ).first()
 
                         if existing:
@@ -139,7 +140,7 @@ def process_geoserver_mosaics( folder_root ):
                         else:
                             log_obj = Log(enable=True, created=datetime.now(), updated=datetime.now())
                             defo = Deforestation(
-                                deforestation_source=DeforestationSource.SMBYC,
+                                deforestation_source=DeforestationSource(source),
                                 deforestation_type=deforestation_type,
                                 name=file_name,
                                 year_start=year_start,

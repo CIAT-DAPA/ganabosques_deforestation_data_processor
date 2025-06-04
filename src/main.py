@@ -13,7 +13,7 @@ from config import config
 
 
 logging.basicConfig(
-    filename='main_pipeline.log',
+    filename=os.path.join(config['WORKSPACE'], 'main_pipeline.log'),
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -21,7 +21,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("main")
 
-def main(years, source):
+def main(years, source, deforestation_value=None):
     try:
         log_print(logger, "Iniciando pipeline Deforestation Data Processor...")
 
@@ -63,13 +63,13 @@ def main(years, source):
         deforestation_step_1(
             input_folder=output_path_spatial,
             output_folder=output_path_deforestation,
-            source=source
+            source=source,
+            deforestation_value=deforestation_value
         )
 
         # Paso 5: Guardar resultados
         log_print(logger, "Paso 5: Guardar resultados...")
-        process_geoserver_mosaics(output_path_deforestation)
-
+        process_geoserver_mosaics(output_path_deforestation, source)
         log_print(logger, "Proceso finalizado.")
 
     except Exception as e:
@@ -97,6 +97,19 @@ if __name__ == "__main__":
         choices=valid_sources,
         help=f"Fuente de los datos. Opciones disponibles: {', '.join(valid_sources)}",
     )
+    parser.add_argument(
+        "-d", "--deforestation_value",
+        type=str,
+        help=f"Nombre de la capa de deforestación (obligatorio si la fuente no es '{DeforestationSource.SMBYC.value}')"
+    )
 
     args = parser.parse_args()
-    main(args.years, args.source)
+
+    # Convertir string a Enum
+    source_enum = DeforestationSource(args.source)
+
+    # Validación condicional
+    if source_enum != DeforestationSource.SMBYC and not args.deforestation_value:
+        parser.error(f"El parámetro --deforestation_value es obligatorio si la fuente no es '{DeforestationSource.SMBYC.value}'.")
+
+    main(args.years, args.source, args.deforestation_value)
