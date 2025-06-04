@@ -11,9 +11,12 @@ from tools.log_print import log_print
 from ganabosques_orm.enums.deforestationsource import DeforestationSource
 from config import config
 
+#crear carpeta base donde guardar la informacion
+base_path = os.path.join(config['WORKSPACE'], "deforestacion", "outputs")
+os.makedirs(base_path, exist_ok=True)
 
 logging.basicConfig(
-    filename=os.path.join(config['WORKSPACE'], 'main_pipeline.log'),
+    filename=os.path.join(base_path, 'main_pipeline.log'),
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -26,11 +29,10 @@ def main(years, source, deforestation_value=None):
         log_print(logger, "Iniciando pipeline Deforestation Data Processor...")
 
         # Parámetros generales
-        base_path = config['WORKSPACE']
-        output_path_get_data = os.path.join(base_path, "deforestacion", "outputs", "01_tmp_get_data_deforestation")
-        output_path_quality = os.path.join(base_path, "deforestacion", "outputs", "02_tmp_quality_control")
-        output_path_spatial = os.path.join(base_path, "deforestacion", "outputs", "03_tmp_spatial_procesing")
-        output_path_deforestation = os.path.join(base_path, "deforestacion", "outputs", "04_tmp_calc_deforestation")
+        output_path_get_data = os.path.join(base_path, "01_tmp_get_data_deforestation")
+        output_path_quality = os.path.join(base_path, "02_tmp_quality_control")
+        output_path_spatial = os.path.join(base_path, "03_tmp_spatial_procesing")
+        output_path_deforestation = os.path.join(base_path, "04_tmp_calc_deforestation")
 
         # Paso 1: Obtener datos
         log_print(logger, "Paso 1: Obtener datos...")
