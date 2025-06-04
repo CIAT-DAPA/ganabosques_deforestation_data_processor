@@ -8,6 +8,7 @@ from calculate_deforestation import deforestation_step_1
 from save_deforestation import process_geoserver_mosaics
 from get_data_SMByC import get_data
 from tools.log_print import log_print
+from ganabosques_orm.enums.deforestationsource import DeforestationSource
 from config import config
 
 
@@ -20,7 +21,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("main")
 
-def main(years):
+def main(years, source):
     try:
         log_print(logger, "Iniciando pipeline Deforestation Data Processor...")
 
@@ -38,7 +39,7 @@ def main(years):
             output_path=output_path_get_data,
             geo=config['URL_GEO'],
             workspace=config['GEO_WORKSPACE'],
-            mosaic='smbyc'
+            mosaic=source
         )
 
         # Paso 2: Validación de calidad
@@ -62,7 +63,7 @@ def main(years):
         deforestation_step_1(
             input_folder=output_path_spatial,
             output_folder=output_path_deforestation,
-            source='SMBYC'
+            source=source
         )
 
         # Paso 5: Guardar resultados
@@ -75,8 +76,27 @@ def main(years):
         log_print(logger, f"Error general en el proceso: {e}", level="error")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipeline de procesamiento de datos de deforestación.")
-    parser.add_argument("-y", "--years", nargs='+', type=int, required=True, help="Lista de años a procesar (por ejemplo: --years 2012 2013 2014  ó  -y 2012 2013 2014 )")
+
+    valid_sources = [source.value for source in DeforestationSource]
+    parser = argparse.ArgumentParser(
+        description="Pipeline de procesamiento de datos de deforestación."
+    )
+    parser.add_argument(
+        "-y",
+        "--years",
+        nargs="+",
+        type=int,
+        required=True,
+        help="Lista de años a procesar (por ejemplo: --years 2012 2013 2014  ó  -y 2012 2013 2014 )",
+    )
+    parser.add_argument(
+        "-s",
+        "--source",
+        type=str,
+        required=True,
+        choices=valid_sources,
+        help=f"Fuente de los datos. Opciones disponibles: {', '.join(valid_sources)}",
+    )
 
     args = parser.parse_args()
-    main(args.years) 
+    main(args.years, args.source)
