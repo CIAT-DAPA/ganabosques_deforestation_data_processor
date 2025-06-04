@@ -1,4 +1,5 @@
 import os
+import re
 from urllib.parse import urljoin
 from glob import glob
 from tools.GeoserverClient import GeoserverClient
@@ -30,7 +31,7 @@ def process_geoserver_mosaics( folder_root, source ):
     output_zip_path = os.path.join(folder_root, "mosaic.zip")
 
     # Configuración de conexión
-    geo_url = urljoin(config["URL_GEO"], "rest/")
+    geo_url = config["URL_GEO"].rstrip("/") + "/rest/"
     geo_user = config["GEO_USER"]
     geo_pwd = config["GEO_PWD"]
     workspace_name = config["GEO_WORKSPACE"]
@@ -46,6 +47,30 @@ def process_geoserver_mosaics( folder_root, source ):
     geoclient.connect()
     geoclient.get_workspace(workspace_name)
     log_print(logger, "Conexión establecida correctamente con GeoServer.")
+
+    # Limpiar archivos ZIP generados
+    try:
+        zip_files = glob(os.path.join(folder_root, "*.zip"))
+        for zip_file in zip_files:
+            os.remove(zip_file)
+            log_print(logger, f"Archivo ZIP eliminado: {zip_file}")
+    except Exception as e:
+        log_print(logger, f"Error al eliminar archivos ZIP: {e}", level="warning")
+
+    # Eliminar carpeta temporal TMP
+    try:
+        if os.path.exists(folder_tmp):
+            for item in os.listdir(folder_tmp):
+                item_path = os.path.join(folder_tmp, item)
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                else:
+                    import shutil
+                    shutil.rmtree(item_path)
+            os.rmdir(folder_tmp)
+            log_print(logger, f"Carpeta TMP eliminada: {folder_tmp}")
+    except Exception as e:
+        log_print(logger, f"Error al eliminar carpeta TMP: {e}", level="warning")
 
     # Procesamiento de cada mosaico
     for current_store in stores:
@@ -82,9 +107,10 @@ def process_geoserver_mosaics( folder_root, source ):
             if mosaic_success:
                 # Determinar tipo de deforestación y ruta
                 deforestation_type = (
-                    DeforestationType.ANNUAL if DeforestationType.ANNUAL in current_store.lower()
+                    DeforestationType.ANNUAL if DeforestationType.ANNUAL.value in current_store.lower()
                     else DeforestationType.CUMULATIVE
                 )
+                print(deforestation_type, f"en el store {current_store}")
                 server_store_path = f"{workspace_name}/{current_store}/"
 
                 connect(
@@ -94,38 +120,57 @@ def process_geoserver_mosaics( folder_root, source ):
 
                 for f in rasters_files:
                     try:
-                        year = log_year = int(''.join(filter(str.isdigit, f)))
                         file_name = os.path.splitext(f)[0]
 
                         if deforestation_type == DeforestationType.ANNUAL:
-                            year_start, year_end = year, year + 1
+                            match = re.search(r'(\d{4})[-_](\d{4})', f)
+                            if match:
+                                year_start, year_end = int(match.group(1)), int(match.group(2))
+                            else:
+                                raise ValueError(f"No se pudo extraer un rango de años del archivo: {f}")
                         else:
                             # Año del acumulado (del archivo .tif)
-                            year_end = int(''.join(filter(str.isdigit, f)))
-                            log_year = year_end
-                            # Buscar los .tif anuales disponibles
-                            all_annual_years = []
-                            for name in os.listdir(folder_layers):
-                                if DeforestationType.ANNUAL in name.lower():
-                                    annual_folder = os.path.join(folder_layers, name)
-                                    annual_tifs = [
-                                        int(''.join(filter(str.isdigit, t)))
-                                        for t in os.listdir(annual_folder)
-                                        if t.endswith(".tif")
-                                    ]
-                                    all_annual_years.extend(annual_tifs)
+                            year_end = year_start= int(''.join(filter(str.isdigit, f)))
 
-                            if all_annual_years:
-                                year_start = min(all_annual_years)
+                            # Buscar registros acumulativos existentes en MongoDB
+                            existing_cumulative = Deforestation.objects(
+                                deforestation_source=source,
+                                deforestation_type=DeforestationType.CUMULATIVE
+                            ).only('year_start')
+
+                            # Si hay registro saca el año inicial de aqui
+                            if existing_cumulative:
+                                year_start = min(defo.year_start for defo in existing_cumulative)
+                            # Buscar los .tif anuales disponibles
                             else:
-                                year_start = year_end  # fallback
+                                all_annual_years = []
+                                for name in os.listdir(folder_layers):
+                                    if DeforestationType.ANNUAL.value in name.lower():
+                                        annual_folder = os.path.join(folder_layers, name)
+                                        annual_tifs = []
+                                        for t in os.listdir(annual_folder):
+                                            if t.endswith(".tif"):
+                                                match = re.search(r'(\d{4})[-_](\d{4})', t)
+                                                if match:
+                                                    annual_tifs.append(int(match.group(1)))  # Solo el primer año
+                                                else:
+                                                    # Si no tiene rango, intenta capturar un único año
+                                                    match_single = re.search(r'(\d{4})', t)
+                                                    if match_single:
+                                                        annual_tifs.append(int(match_single.group(1)))
+                                        all_annual_years.extend(annual_tifs)
+
+                                if all_annual_years:
+                                    year_start = min(all_annual_years)
+                                else:
+                                    year_start = year_end  # fallback
 
                         existing = Deforestation.objects(
                             name=file_name,
                             year_start=year_start,
                             year_end=year_end,
                             deforestation_type=deforestation_type,
-                            deforestation_source=DeforestationSource(source)
+                            deforestation_source=source
                         ).first()
 
                         if existing:
@@ -136,11 +181,11 @@ def process_geoserver_mosaics( folder_root, source ):
                                 existing.log = Log(enable=True, created=datetime.now(), updated=datetime.now())
                             existing.save()
                             
-                            log_print(logger, f"Registro actualizado en MongoDB: {current_store} - {log_year}")
+                            log_print(logger, f"Registro actualizado en MongoDB: {current_store} {year_start} - {year_end}")
                         else:
                             log_obj = Log(enable=True, created=datetime.now(), updated=datetime.now())
                             defo = Deforestation(
-                                deforestation_source=DeforestationSource(source),
+                                deforestation_source=source,
                                 deforestation_type=deforestation_type,
                                 name=file_name,
                                 year_start=year_start,
@@ -149,7 +194,7 @@ def process_geoserver_mosaics( folder_root, source ):
                                 log=log_obj
                             )
                             defo.save()
-                            log_print(logger, f"Registro creado en MongoDB: {current_store} - {log_year}")
+                            log_print(logger, f"Registro creado en MongoDB: {current_store} {year_start} - {year_end}")
 
                     except Exception as mongo_err:
                         log_print(logger, f"Error al guardar/actualizar '{f}' en MongoDB: {mongo_err}", level="error")
@@ -182,6 +227,19 @@ def process_geoserver_mosaics( folder_root, source ):
 
         except Exception as e:
             log_print(logger, f"Error al procesar el store '{current_store}': {str(e)}", level="error")
+            try:
+                if os.path.exists(folder_tmp):
+                    for item in os.listdir(folder_tmp):
+                        item_path = os.path.join(folder_tmp, item)
+                        if os.path.isfile(item_path):
+                            os.remove(item_path)
+                        else:
+                            import shutil
+                            shutil.rmtree(item_path)
+                    os.rmdir(folder_tmp)
+                    log_print(logger, f"Carpeta TMP eliminada: {folder_tmp}")
+            except Exception as e:
+                log_print(logger, f"Error al eliminar carpeta TMP: {e}", level="warning")
             continue
 
     log_print(logger, "Proceso de guardado completado.")
