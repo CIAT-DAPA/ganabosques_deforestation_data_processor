@@ -79,7 +79,7 @@ Loads results from calculate_deforestation, builds a raster mosaic, publishes it
  ```
 2. Create  a virtual environment
 ```bash
- python -m venv envt
+ python -m venv env
  ```
 
 3. Ativate a virtual environment
@@ -141,12 +141,43 @@ export MONGO_DB_NAME="ganabosques"
  - MONGO_DB_NAME refers to the database where the information is stored within MongoDB.
 
 ## ▶️ Running the modules
-```bash
-Windows CMD o PowerShell
-py deforestation\src\main.py
 
-Linux, macOS o Git Bash
-python3 deforestation/src/main.py
+Run the main script `main.py` with the following arguments:
+
+```bash
+python main.py --years 2012 2013 2014 --source smbyc
 ```
 
+If the source is not `smbyc`, the `--deforestation_value` parameter must be included:
 
+```bash
+python main.py --years 2012 --source IDEAM --deforestation_value deforestation_2012
+```
+
+### Arguments
+
+- `--years` or `-y`: List of years to process. Required.
+- `--source` or `-s`: Data source. Mandatory. Valid options: smbyc, etc.
+- `--deforestation_value` or `-d`: Name of the deforestation layer. Mandatory if the source is not smbyc.
+
+
+## Outputs
+
+The results are stored in the folder configured in the `WORKSPACE` variable, in subdirectories organized by steps:
+
+1. `01_tmp_get_data_deforestation`
+2. `02_tmp_quality_control`
+3. `03_tmp_spatial_processing`
+4. `04_tmp_calc_deforestation`
+
+### Logging
+
+A `main_pipeline.log` file is generated inside the `outputs` directory containing the execution log.
+
+## Contributors
+
+This project has had the following people who made contributions through commits to the repository:
+
+- [bmora-0110](https://github.com/bmora-0110)
+- [stevensotelo](https://github.com/stevensotelo) 
+- [victor-993](https://github.com/victor-993)
