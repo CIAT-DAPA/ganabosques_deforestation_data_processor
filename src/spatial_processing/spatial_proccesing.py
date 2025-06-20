@@ -72,7 +72,7 @@ def mdl_spatial_processing(input_folder, output_folder):
                                 src_crs=src.crs,
                                 dst_transform=transform,
                                 dst_crs=dst_crs,
-                                resampling=Resampling.bilinear
+                                resampling=Resampling.nearest
                             )
                 else:
                     # Copiar directamente si CRS y resolución son iguales
