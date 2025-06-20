@@ -1,1 +1,1 @@
-from .deforestation_calc import deforestation_step_1
+from .deforestation_calc import deforestation_calc

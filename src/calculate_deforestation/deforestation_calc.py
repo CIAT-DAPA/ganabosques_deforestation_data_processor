@@ -16,7 +16,7 @@ from ganabosques_orm.enums.deforestationsource import DeforestationSource
 
 logger = logging.getLogger(__name__)
 
-def deforestation_step_1(input_folder, output_folder, source, deforestation_value=None):
+def deforestation_calc(input_folder, output_folder, source, deforestation_value=None):
     os.makedirs(output_folder, exist_ok=True)
     log_path = os.path.join(output_folder, 'log_parte1.txt')
     log_lines = []
@@ -123,3 +123,4 @@ def deforestation_step_1(input_folder, output_folder, source, deforestation_valu
         log_file.writelines('\n'.join(log_lines))
 
     log_print(logger, f"Log guardado en: {log_path}")
+

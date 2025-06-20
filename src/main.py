@@ -4,7 +4,7 @@ import argparse
 
 from quality_control import quality_control
 from spatial_processing import mdl_spatial_processing
-from calculate_deforestation import deforestation_step_1
+from calculate_deforestation import deforestation_calc
 from save_deforestation import process_geoserver_mosaics
 from get_data_SMByC import get_data
 from tools.log_print import log_print
@@ -62,7 +62,7 @@ def main(years, source, deforestation_value=None):
 
         # Paso 4: Calcular deforestación
         log_print(logger, "Paso 4: Calcular deforestación...")
-        deforestation_step_1(
+        deforestation_calc(
             input_folder=output_path_spatial,
             output_folder=output_path_deforestation,
             source=source,
