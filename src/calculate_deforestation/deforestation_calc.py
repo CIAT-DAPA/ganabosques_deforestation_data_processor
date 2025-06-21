@@ -10,7 +10,7 @@ from rasterio.enums import Resampling
 import numpy as np
 from datetime import datetime
 import logging
-from tqdm import tqdm  
+from tqdm import tqdm
 from tools.log_print import log_print  # Asegúrate que esta ruta esté bien
 from ganabosques_orm.enums.deforestationsource import DeforestationSource
 
@@ -43,7 +43,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
         log_print(logger, msg, level='warning')
         log_lines.append(msg)
 
-    # PROCESAMIENTO ANUAL CON BARRA DE PROGRESO
+    # PROCESAMIENTO ANUAL
     for tif in tqdm(tif_files, desc="Procesando deforestación anual", unit="archivo"):
         input_path = os.path.join(input_folder, tif)
         year_str = ''.join(filter(str.isdigit, tif))
@@ -55,19 +55,24 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
 
         try:
             with rasterio.open(input_path) as src:
-                profile = src.profile
+                profile = src.profile.copy()
+                nodata_value = src.nodata if src.nodata is not None else -99999
                 profile.update({
                     'dtype': 'int32',
-                    'nodata': -99999,
+                    'nodata': nodata_value,
                     'compress': 'lzw'
                 })
 
                 with rasterio.open(output_path, 'w', **profile) as dst:
                     for ji, window in src.block_windows(1):
                         data = src.read(1, window=window)
-                        data_clean = np.where((data == src.nodata) | (data == 0), 0, data)
-                        filtered = np.where(data_clean == value_to_filter, value_to_filter, 0)
-                        dst.write(filtered.astype('int32'), 1, window=window)
+
+                        # FILTRADO EXACTO (solo los pixeles con el valor deseado quedan, el resto es nodata)
+                        filtered = np.full(data.shape, nodata_value, dtype='int32')
+                        mask = (data == value_to_filter)
+                        filtered[mask] = value_to_filter
+
+                        dst.write(filtered, 1, window=window)
 
                 processed_layers.append(output_path)
                 years.append(year)
@@ -80,34 +85,52 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
             log_lines.append(msg)
             log_print(logger, msg, level='error')
 
-    # ACUMULADO PROGRESIVO CON BARRA DE PROGRESO
+    # ACUMULADO PROGRESIVO POR BLOQUES (sin cargar en memoria)
     if processed_layers:
         try:
             sorted_years_layers = sorted(zip(years, processed_layers))
-            cumulative_sum = None
 
             for idx, (year, layer_path) in enumerate(tqdm(sorted_years_layers, desc="Generando acumulado", unit="año")):
                 with rasterio.open(layer_path) as src:
                     profile = src.profile
                     profile.update(dtype='int32', nodata=-99999, compress='lzw')
-                    data = src.read(1)
 
-                    if cumulative_sum is None:
-                        cumulative_sum = np.zeros_like(data, dtype='int32')
+                    cumulative_folder = os.path.join(output_folder, f"{source.lower()}_deforestation_cumulative")
+                    os.makedirs(cumulative_folder, exist_ok=True)
 
-                    cumulative_sum += data
+                    cum_filename = f"{source.lower()}_deforestation_cumulative_{year}.tif"
+                    cum_path = os.path.join(cumulative_folder, cum_filename)
 
-                    if idx >= 1:
-                        cum_filename = f"{source.lower()}_deforestation_cumulative_{year}.tif"
-                        cum_path = os.path.join(output_folder, f"{source.lower()}_deforestation_cumulative", cum_filename)
-                        os.makedirs(os.path.dirname(cum_path), exist_ok=True)
-
+                    if idx == 0:
+                        # Primer año, guardar tal cual
                         with rasterio.open(cum_path, 'w', **profile) as dst:
-                            dst.write(cumulative_sum, 1)
+                            for ji, window in src.block_windows(1):
+                                data = src.read(1, window=window)
+                                dst.write(data.astype('int32'), 1, window=window)
+                    else:
+                        prev_year = sorted_years_layers[idx - 1][0]
+                        prev_cum_path = os.path.join(
+                            output_folder,
+                            f"{source.lower()}_deforestation_cumulative",
+                            f"{source.lower()}_deforestation_cumulative_{prev_year}.tif"
+                        )
 
-                        msg = f"Raster acumulado hasta {year} guardado como {cum_filename}."
-                        log_lines.append(msg)
-                        log_print(logger, msg)
+                        with rasterio.open(prev_cum_path) as prev, rasterio.open(cum_path, 'w', **profile) as dst:
+                            for ji, window in src.block_windows(1):
+                                current_data = src.read(1, window=window)
+                                prev_data = prev.read(1, window=window)
+
+                                current_masked = np.where(current_data == src.nodata, 0, current_data)
+                                prev_masked = np.where(prev_data == prev.nodata, 0, prev_data)
+
+                                sum_data = current_masked + prev_masked
+                                sum_data[sum_data == 0] = profile['nodata']
+
+                                dst.write(sum_data.astype('int32'), 1, window=window)
+
+                    msg = f"Raster acumulado hasta {year} guardado como {cum_filename}."
+                    log_lines.append(msg)
+                    log_print(logger, msg)
 
         except Exception as e:
             msg = f"ERROR generando acumulado: {str(e)}"
@@ -123,4 +146,3 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
         log_file.writelines('\n'.join(log_lines))
 
     log_print(logger, f"Log guardado en: {log_path}")
-
