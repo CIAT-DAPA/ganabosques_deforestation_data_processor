@@ -35,30 +35,30 @@ def main(years, source, deforestation_value=None):
         output_path_deforestation = os.path.join(base_path, "04_tmp_calc_deforestation")
 
         # Paso 1: Obtener datos
-        log_print(logger, "Paso 1: Obtener datos...")
-        get_data(
-            years=years,
-            output_path=output_path_get_data,
-            geo=config['URL_GEO'],
-            workspace=config['GEO_WORKSPACE'],
-            mosaic=source
-        )
+        #log_print(logger, "Paso 1: Obtener datos...")
+        #get_data(
+        #    years=years,
+        #    output_path=output_path_get_data,
+        #    geo=config['URL_GEO'],
+        #    workspace=config['GEO_WORKSPACE'],
+        #    mosaic=source
+        #) 
 
         # Paso 2: Validación de calidad
-        log_print(logger, "Paso 2: Validación de calidad...")
-        if not quality_control(
-            input_dir=output_path_get_data,
-            output_dir=output_path_quality):
-            log_print(logger, "Fallo en calidad. Abortando.", level="error")
-            return
+        #log_print(logger, "Paso 2: Validación de calidad...")
+        #if not quality_control(
+        #    input_dir=output_path_get_data,
+        #    output_dir=output_path_quality):
+        #    log_print(logger, "Fallo en calidad. Abortando.", level="error")
+        #    return
 
         # Paso 3: Validación espacial
-        log_print(logger, "Paso 3: Validación espacial...")
-        if not mdl_spatial_processing(
-            input_folder=output_path_quality,
-            output_folder=output_path_spatial):
-            log_print(logger, "Fallo en validación espacial. Abortando.", level="error")
-            return
+        #log_print(logger, "Paso 3: Validación espacial...")
+        #if not mdl_spatial_processing(
+        #    input_folder=output_path_quality,
+        #    output_folder=output_path_spatial):
+        #    log_print(logger, "Fallo en validación espacial. Abortando.", level="error")
+        #    return
 
         # Paso 4: Calcular deforestación
         log_print(logger, "Paso 4: Calcular deforestación...")
@@ -70,9 +70,9 @@ def main(years, source, deforestation_value=None):
         )
 
         # Paso 5: Guardar resultados
-        log_print(logger, "Paso 5: Guardar resultados...")
-        process_geoserver_mosaics(output_path_deforestation, source)
-        log_print(logger, "Proceso finalizado.")
+        #log_print(logger, "Paso 5: Guardar resultados...")
+        #process_geoserver_mosaics(output_path_deforestation, source)
+        #log_print(logger, "Proceso finalizado.")
 
     except Exception as e:
         log_print(logger, f"Error general en el proceso: {e}", level="error")
