@@ -9,6 +9,7 @@ from rasterio.errors import RasterioIOError
 import numpy as np
 from datetime import datetime
 import logging
+import re  # <-- Import necesario para trabajar con patrones de nombres
 from tools.log_print import log_print  # Asegúrate que esta ruta sea correcta
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,37 @@ def quality_control(input_dir, output_dir):
                     mensaje = "Archivo válido con valores distintos de 0 y nodata."
                     resultados_log.append(mensaje)
                     log_print(logger, mensaje)
-                    nombre_salida = os.path.join(output_dir, archivo)
+
+                    # ================= LÓGICA DE RENOMBRADO =================
+                    # Queremos que:
+                    #   smbyc_2010-2012.tif  -> smbyc_2010-01-01-2012-01-01.tif
+                    #   smbyc_2012-2013.tif  -> smbyc_2012-01-01-2013-01-01.tif
+                    # Y si ya viene como smbyc_2010-01-01-2012-01-01.tif, lo dejamos igual.
+
+                    nombre_base, extension = os.path.splitext(archivo)
+
+                    # Caso 1: ya tiene el formato completo YYYY-MM-DD-YYYY-MM-DD => lo dejamos igual
+                    patron_completo = r".+_\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}"
+                    if re.fullmatch(patron_completo, nombre_base):
+                        nuevo_nombre = archivo  # sin cambios
+                    else:
+                        # Caso 2: formato corto tipo smbyc_2010-2012
+                        patron_corto = r"(.+?)_(\d{4})-(\d{4})"
+                        m = re.fullmatch(patron_corto, nombre_base)
+                        if m:
+                            prefijo = m.group(1)   # smbyc
+                            anio_ini = m.group(2)  # 2010
+                            anio_fin = m.group(3)  # 2012
+
+                            nuevo_nombre_base = f"{prefijo}_{anio_ini}-01-01-{anio_fin}-01-01"
+                            nuevo_nombre = nuevo_nombre_base + extension
+                        else:
+                            # Si no cumple ningún patrón, dejamos el nombre original
+                            nuevo_nombre = archivo
+
+                    nombre_salida = os.path.join(output_dir, nuevo_nombre)
+                    # ========================================================
+
                     shutil.copy(raster_path, nombre_salida)
                     procesados += 1
                 else:

@@ -5,6 +5,7 @@ import numpy as np
 import traceback
 import logging
 from tqdm import tqdm
+import re  # <-- nuevo: para manejar patrones de nombre
 from tools.log_print import log_print  # Asegúrate de que esta ruta sea válida
 from config import config
 
@@ -38,7 +39,35 @@ def mdl_spatial_processing(input_folder, output_folder):
         for file in tqdm(tif_files, desc="Procesando archivos", unit="archivo"):
             log_print(logger, f"Procesando archivo: {file}")
             input_path = os.path.join(input_folder, file)
-            output_path = os.path.join(output_folder, file)
+
+            # ================= LÓGICA DE RENOMBRADO (MISMA QUE EN EL QC) =================
+            # Entradas tipo:
+            #   smbyc_2010-2012.tif  -> salida: smbyc_2010-01-01-2012-01-01.tif
+            #   smbyc_2012-2013.tif  -> salida: smbyc_2012-01-01-2013-01-01.tif
+            # Si ya es smbyc_2010-01-01-2012-01-01.tif, se deja igual.
+
+            nombre_base, extension = os.path.splitext(file)
+
+            # Formato completo: *_YYYY-MM-DD-YYYY-MM-DD
+            patron_completo = r".+_\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}"
+            if re.fullmatch(patron_completo, nombre_base):
+                nuevo_nombre = file  # sin cambios
+            else:
+                # Formato corto: prefijo_YYYY-YYYY
+                patron_corto = r"(.+?)_(\d{4})-(\d{4})"
+                m = re.fullmatch(patron_corto, nombre_base)
+                if m:
+                    prefijo = m.group(1)   # smbyc
+                    anio_ini = m.group(2)  # 2010
+                    anio_fin = m.group(3)  # 2012
+                    nuevo_nombre_base = f"{prefijo}_{anio_ini}-01-01-{anio_fin}-01-01"
+                    nuevo_nombre = nuevo_nombre_base + extension
+                else:
+                    # Si no cumple ningún patrón, se respeta el nombre original
+                    nuevo_nombre = file
+
+            output_path = os.path.join(output_folder, nuevo_nombre)
+            # ====================================================================
 
             with rio.open(input_path) as src:
                 src_crs = src.crs
@@ -74,7 +103,7 @@ def mdl_spatial_processing(input_folder, output_folder):
                             num_threads=2  # Acelera si tu CPU lo soporta
                         )
 
-            log_print(logger, f"Archivo procesado correctamente: {file}")
+            log_print(logger, f"Archivo procesado correctamente: {nuevo_nombre}")
 
         # Escribir log final
         with open(log_path, 'w') as log_file:
