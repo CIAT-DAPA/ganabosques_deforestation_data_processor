@@ -38,9 +38,11 @@ logging.basicConfig(
     filename=os.path.join(base_path, 'main_pipeline.log'),
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,   # <- clave: evita duplicados por configuraciones previas
 )
 logger = logging.getLogger("main")
+
 
 def main(years, source, deforestation_value=None, steps={1,2,3,4,5}):
     try:
