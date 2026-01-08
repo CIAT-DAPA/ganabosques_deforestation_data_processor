@@ -53,7 +53,9 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
         log_print(logger, msg, level='warning')
         log_lines.append(msg)
 
-    # PROCESAMIENTO ANUAL
+    # =========================
+    # PROCESAMIENTO "ANUAL"
+    # =========================
     for tif in tqdm(tif_files, desc="Procesando deforestación anual", unit="archivo"):
         input_path = os.path.join(input_folder, tif)
 
@@ -61,15 +63,22 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
             year_start, year_end = extract_years_from_filename(tif)
             output_years.append(year_end)
 
-            output_filename = f"{source.lower()}_deforestation_annual_{year_start}-{year_end}.tif"
-            output_path = os.path.join(output_folder, f"{source.lower()}_deforestation_annual", output_filename)
+            output_filename = (
+                f"smbyc_deforestation_annual_"
+                f"{year_start}0101-{year_end}0101.tif"
+            )
+            output_path = os.path.join(
+                output_folder,
+                "smbyc_deforestation_annual",
+                output_filename
+            )
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             with rasterio.open(input_path) as src:
                 profile = src.profile.copy()
                 profile.update({
                     'dtype': 'float32',
-                    'nodata': None,  # usamos NaN en datos
+                    'nodata': None,
                     'compress': 'lzw'
                 })
 
@@ -77,10 +86,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
                     for ji, window in src.block_windows(1):
                         data = src.read(1, window=window)
 
-                        # Crear matriz con NaN
                         filtered = np.full(data.shape, np.nan, dtype='float32')
-
-                        # Mantener solo píxeles de deforestación
                         mask = (data == value_to_filter)
                         filtered[mask] = 2
 
@@ -96,35 +102,54 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
             log_lines.append(msg)
             log_print(logger, msg, level='error')
 
+    # =========================
     # ACUMULADO PROGRESIVO
+    # =========================
     if processed_layers:
         try:
+            # Ordena por year_end (2012, 2013, 2014, ...)
             sorted_layers = sorted(zip(output_years, processed_layers))
 
-            for idx, (year, layer_path) in enumerate(tqdm(sorted_layers, desc="Generando acumulado", unit="año")):
+            for idx, (year_end, layer_path) in enumerate(
+                tqdm(sorted_layers, desc="Generando acumulado", unit="año")
+            ):
                 with rasterio.open(layer_path) as src:
-                    profile = src.profile
+                    profile = src.profile.copy()
                     profile.update(dtype='float32', nodata=None, compress='lzw')
 
-                    cumulative_folder = os.path.join(output_folder, f"{source.lower()}_deforestation_cumulative")
+                    cumulative_folder = os.path.join(output_folder, "smbyc_deforestation_cumulative")
                     os.makedirs(cumulative_folder, exist_ok=True)
 
-                    # Nuevo nombre: deforestation_cumulative_2010-(year-1)
                     start_year = 2010
-                    end_year = year - 1
-                    cum_filename = f"deforestation_cumulative_{start_year}-{end_year}.tif"
+
+                    # <<< CAMBIO >>> Antes era end_year = year_end - 1
+                    # Queremos que:
+                    # - 2010-2012 + 2012-2013 => 2010-2013
+                    # Entonces el acumulado se nombra como 2010-{year_end}
+                    end_year = year_end 
+
+                    cum_filename = (
+                        f"smbyc_deforestation_cumulative_"
+                        f"{start_year}0101-{end_year}0101.tif"
+                    )
                     cum_path = os.path.join(cumulative_folder, cum_filename)
 
                     if idx == 0:
-                        # Primer año → copiar tal cual (pero normalizado a 2 y NaN)
+                        # Primer acumulado = primera capa (ej. 2010-2012)
                         with rasterio.open(cum_path, 'w', **profile) as dst:
                             for ji, window in src.block_windows(1):
                                 data = src.read(1, window=window).astype('float32')
                                 data = np.where(data == 2, 2, np.nan)
                                 dst.write(data, 1, window=window)
                     else:
-                        prev_year = sorted_layers[idx - 1][0]
-                        prev_cum_filename = f"deforestation_cumulative_{start_year}-{prev_year - 1}.tif"
+                        prev_year_end = sorted_layers[idx - 1][0]
+
+                        # <<< CAMBIO >>> Antes usaba prev_year_end - 1
+                        # Ahora el nombre del previo debe ser 2010-{prev_year_end}
+                        prev_cum_filename = (
+                            f"smbyc_deforestation_cumulative_"
+                            f"{start_year}0101-{prev_year_end}0101.tif"
+                        )
                         prev_cum_path = os.path.join(cumulative_folder, prev_cum_filename)
 
                         with rasterio.open(prev_cum_path) as prev, rasterio.open(cum_path, 'w', **profile) as dst:
@@ -132,21 +157,19 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
                                 current_data = src.read(1, window=window).astype('float32')
                                 prev_data = prev.read(1, window=window).astype('float32')
 
-                                # Reemplazar NaN por 0 para la suma
+                                # NaN -> 0 para sumar
                                 current_masked = np.where(np.isnan(current_data), 0, current_data)
                                 prev_masked = np.where(np.isnan(prev_data), 0, prev_data)
 
                                 sum_data = current_masked + prev_masked
 
-                                # Forzar todos los valores > 2 a 2
+                                # Mantener binario: 0 o 2
                                 sum_data = np.where(sum_data > 2, 2, sum_data)
-
-                                # Convertir ceros de vuelta a NaN
                                 sum_data = np.where(sum_data == 0, np.nan, sum_data)
 
                                 dst.write(sum_data, 1, window=window)
 
-                    msg = f"Raster acumulado hasta {end_year} guardado como {cum_filename}."
+                    msg = f"Raster acumulado guardado como {cum_filename}."
                     log_lines.append(msg)
                     log_print(logger, msg)
 
