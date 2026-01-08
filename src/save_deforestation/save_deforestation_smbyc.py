@@ -1,9 +1,9 @@
 # save_deforestation.py
 # =====================================================================
-# Publicar/actualizar mosaicos (annual + cumulative) en GeoServer
+# Publicar/actualizar mosaicos SMBYC (annual + cumulative) en GeoServer
 # USANDO indexer.properties y timeregex.properties EXTERNOS
 #
-# Estructura esperada de salida:
+# Estructura esperada de salida (Paso 4):
 #   output_path_deforestation/
 #     smbyc_deforestation_annual/*.tif
 #     smbyc_deforestation_cumulative/*.tif
@@ -14,12 +14,6 @@
 #     timeregex.properties
 #
 # + Guardar registros en MongoDB (colección 'deforestation')
-#
-# CAMBIO IMPORTANTE (formatos nuevos):
-# - Antes: _2010-01-01-2012-01-01.tif  (YYYY-MM-DD)
-# - Ahora: _20100101-20120101.tif      (YYYYMMDD)
-#   -> Se ajusta el parser de fechas para Mongo.
-#   -> Se agrega verificación/advertencia sobre timeregex.properties.
 # =====================================================================
 
 import os
@@ -30,7 +24,6 @@ import shutil
 import logging
 from zipfile import ZipFile
 from datetime import datetime
-from typing import Optional, Tuple
 
 from pymongo import MongoClient
 
@@ -70,14 +63,6 @@ def _list_tifs(folder: str):
     return sorted(glob.glob(os.path.join(folder, "*.tif")))
 
 
-def _read_text_file(path: str) -> str:
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()
-    except Exception:
-        return ""
-
-
 def _check_external_properties(props_dir: str):
     idx = os.path.join(props_dir, "indexer.properties")
     trg = os.path.join(props_dir, "timeregex.properties")
@@ -85,29 +70,6 @@ def _check_external_properties(props_dir: str):
         raise FileNotFoundError(f"indexer.properties no encontrado en: {props_dir}")
     if not os.path.isfile(trg):
         raise FileNotFoundError(f"timeregex.properties no encontrado en: {props_dir}")
-
-    # Advertencia útil por el cambio de formato de nombres (YYYYMMDD)
-    trg_txt = _read_text_file(trg)
-    # Si el regex contiene patrones con guiones, probablemente no matchea YYYYMMDD
-    if re.search(r"\d\{4\}-\d\{2\}-\d\{2\}", trg_txt) or re.search(r"\d{4}-\d{2}-\d{2}", trg_txt):
-        log_print(
-            logger,
-            "[GeoServer] ⚠ timeregex.properties parece estar configurado para fechas con guiones "
-            "(YYYY-MM-DD). Tus archivos actuales son YYYYMMDD. Revisa regex/format.",
-            level="warning",
-        )
-    else:
-        # Si detectamos \d{8} es buena señal para YYYYMMDD
-        if re.search(r"\\d\{8\}", trg_txt) or re.search(r"\d{8}", trg_txt):
-            log_print(logger, "[GeoServer] timeregex.properties parece compatible con YYYYMMDD.")
-        else:
-            log_print(
-                logger,
-                "[GeoServer] ⚠ No pude inferir el formato en timeregex.properties. "
-                "Asegúrate que el regex capture la fecha y tenga format=yyyyMMdd si aplica.",
-                level="warning",
-            )
-
     return idx, trg
 
 
@@ -174,63 +136,44 @@ def _zip_tifs_only(src_folder: str, tmp_dir: str, zip_dir: str, zip_name: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Mongo helpers
+# Mongo helpers (ADICIÓN)
 # ──────────────────────────────────────────────────────────────────────────────
 def _connect_mongo():
     mongo_uri = config.get("MONGO_URI", "mongodb://localhost:27017")
     mongo_db = config.get("MONGO_DB_NAME", "ganabosques")
     log_print(logger, f"[Mongo] Conectando a {mongo_uri} / DB={mongo_db}")
-    # timeout para evitar cuelgues si el host no responde
-    client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    client = MongoClient(mongo_uri)
     return client[mongo_db]
 
 
-def _parse_period_from_filename(filename: str) -> Tuple[datetime, datetime]:
+def _parse_period_from_filename(filename: str):
     """
-    Extrae period_start y period_end desde nombres tipo:
-
-      Formato NUEVO (actual):
-        smbyc_deforestation_annual_20100101-20120101.tif
-        smbyc_deforestation_cumulative_20100101-20130101.tif
-
-      Formato VIEJO (compatibilidad opcional):
-        smbyc_deforestation_annual_2010-01-01-2012-01-01.tif
+    Extrae period_start y period_end desde un nombre tipo:
+      smbyc_deforestation_annual_2010-01-01-2012-01-01.tif
+      smbyc_deforestation_cumulative_2010-01-01-2013-01-01.tif
 
     Devuelve (datetime_inicio, datetime_fin).
     """
     base = os.path.basename(filename)
+    m = re.search(r"(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})", base)
+    if not m:
+        raise ValueError(f"No se pudo extraer rango de fechas desde '{base}'")
 
-    # NUEVO: _YYYYMMDD-YYYYMMDD.tif (anclado al final)
-    m = re.search(r"_(\d{8})-(\d{8})\.tif$", base)
-    if m:
-        start_dt = datetime.strptime(m.group(1), "%Y%m%d")
-        end_dt = datetime.strptime(m.group(2), "%Y%m%d")
-        return start_dt, end_dt
-
-    # VIEJO: _YYYY-MM-DD-YYYY-MM-DD.tif (anclado al final)
-    m = re.search(r"_(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})\.tif$", base)
-    if m:
-        start_dt = datetime.strptime(m.group(1), "%Y-%m-%d")
-        end_dt = datetime.strptime(m.group(2), "%Y-%m-%d")
-        return start_dt, end_dt
-
-    raise ValueError(f"No se pudo extraer rango de fechas desde '{base}'")
+    start_dt = datetime.strptime(m.group(1), "%Y-%m-%d")
+    end_dt = datetime.strptime(m.group(2), "%Y-%m-%d")
+    return start_dt, end_dt
 
 
-def _build_wcs_base_url(geo_base_url: str, workspace: str, coverage_name: str) -> str:
+def _build_wcs_base_url(geo_base_url: str, workspace: str, store_name: str) -> str:
     """
-    URL base WCS (sin subset de tiempo).
-
-    Nota: WCS típicamente cuelga de /geoserver/ows (sin /{workspace} en la ruta)
-    y el workspace va en coverageId como namespace: workspace:coverage
+    URL base WCS (sin subset de tiempo)
     """
     geo = (geo_base_url or "").rstrip("/")
-    ws = (workspace or "").strip()
-    cov = (coverage_name or "").strip()
+    ws = (workspace or "").strip("/")
     return (
-        f"{geo}/ows?"
+        f"{geo}/{ws}/ows?"
         "service=WCS&version=2.0.1&request=GetCoverage"
-        f"&coverageId={ws}:{cov}&format=image/geotiff"
+        f"&coverageId={store_name}&format=image/geotiff"
     )
 
 
@@ -255,10 +198,7 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
 
     geo_base_url = config.get("URL_GEO", "http://localhost:8600/geoserver")
     workspace = config.get("GEO_WORKSPACE", "deforestation")
-
-    # normaliza store para consistencia
-    store_name_norm = (store_name or "").lower().strip()
-    wcs_path = _build_wcs_base_url(geo_base_url, workspace, store_name_norm)
+    wcs_path = _build_wcs_base_url(geo_base_url, workspace, store_name)
 
     tifs = _list_tifs(rasters_dir)
     if not tifs:
@@ -266,6 +206,7 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
         return
 
     now = datetime.utcnow()
+    store_lower = (store_name or "").lower()
 
     for tif_path in tifs:
         fname = os.path.basename(tif_path)
@@ -279,13 +220,13 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
 
         filter_doc = {
             "deforestation_source": source_value,
-            "deforestation_type": store_name_norm,
+            "deforestation_type": store_lower,
             "name": name_no_ext,
         }
 
         update_doc_set = {
             "deforestation_source": source_value,
-            "deforestation_type": store_name_norm,
+            "deforestation_type": store_lower,
             "name": name_no_ext,
             "period_start": period_start,
             "period_end": period_end,
@@ -294,7 +235,9 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
             "log.updated": now,
         }
 
-        update_doc_on_insert = {"log.created": now}
+        update_doc_on_insert = {
+            "log.created": now,
+        }
 
         try:
             result = coll.update_one(
@@ -309,7 +252,7 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
         except Exception as e:
             log_print(logger, f"[Mongo] ❌ Error guardando '{name_no_ext}': {e}", level="error")
 
-    log_print(logger, f"[Mongo] ✅ Registros guardados para store={store_name_norm}")
+    log_print(logger, f"[Mongo] ✅ Registros guardados para store={store_name}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -320,7 +263,7 @@ class GeoserverClient:
         self.url = url
         self.user = user
         self.pwd = pwd
-        self.catalog: Optional[Catalog] = None
+        self.catalog = None
         self.workspace = None
         self.workspace_name = ""
 
@@ -333,8 +276,6 @@ class GeoserverClient:
             sys.exit(1)
 
     def get_workspace(self, name: str):
-        if not self.catalog:
-            raise RuntimeError("Catálogo de GeoServer no inicializado.")
         self.workspace = self.catalog.get_workspace(name)
         self.workspace_name = name
         if not self.workspace:
@@ -343,7 +284,7 @@ class GeoserverClient:
         log_print(logger, f"Workspace encontrado: {name}")
 
     def get_store(self, store_name: str):
-        if not self.workspace or not self.catalog:
+        if not self.workspace:
             return None
         try:
             return self.catalog.get_store(store_name, self.workspace)
@@ -355,8 +296,6 @@ class GeoserverClient:
         Habilita dimensión TIME en el coverage del store.
         (Los valores de time vienen del indexer/timeregex del mosaico)
         """
-        if not self.catalog:
-            return
         try:
             coverage = self.catalog.get_resource(store_name, workspace=self.workspace)
             if not coverage:
@@ -376,9 +315,6 @@ class GeoserverClient:
         """
         Crea ImageMosaic usando ZIP (TIF + PROPS).
         """
-        if not self.catalog:
-            raise RuntimeError("Catálogo de GeoServer no inicializado.")
-
         zip_path = _zip_tifs_and_props(
             rasters_dir,
             props_dir,
@@ -402,9 +338,6 @@ class GeoserverClient:
         """
         Actualiza mosaico existente usando harvest (ZIP solo TIF).
         """
-        if not self.catalog:
-            raise RuntimeError("Catálogo de GeoServer no inicializado.")
-
         zip_path = _zip_tifs_only(
             rasters_dir,
             tmp_dir=os.path.join(tmp_dir, f"{store.name}_tmp_harvest"),
@@ -425,7 +358,7 @@ class GeoserverClient:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# API principal usada por el main
+# API principal usada por el main (Paso 5)
 # ──────────────────────────────────────────────────────────────────────────────
 def process_geoserver_mosaics(output_path_deforestation: str, source: str):
     """
@@ -434,7 +367,7 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
     - Usa properties EXTERNAS (indexer.properties + timeregex.properties).
     - Crea mosaico con ZIP(TIF+PROPS).
     - Si existe, actualiza con harvest ZIP(solo TIF).
-    - Guarda registros en Mongo (colección deforestation) con period_start/period_end parseado.
+    - ADICIÓN: guarda registros en Mongo (colección deforestation).
     """
     try:
         gs_url = _ensure_rest_url(config.get("URL_GEO") or "")
@@ -445,7 +378,7 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
         if not all([gs_url, username, password, ws_name]):
             raise RuntimeError("Faltan variables en .env/config: URL_GEO, GEO_USER, GEO_PWD, GEO_WORKSPACE")
 
-        src_lower = (source or "").lower().strip()
+        src_lower = (source or "").lower()
 
         annual_dir = os.path.join(output_path_deforestation, f"{src_lower}_deforestation_annual")
         cumulative_dir = os.path.join(output_path_deforestation, f"{src_lower}_deforestation_cumulative")
@@ -469,7 +402,7 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
 
         # === ANUAL ===
         if os.path.isdir(annual_dir):
-            store_annual = f"{src_lower}_deforestation_annual".lower()
+            store_annual = f"{src_lower}_deforestation_annual"
             store_obj = geo.get_store(store_annual)
             if store_obj:
                 log_print(logger, f"[GeoServer] Actualizando store existente: {store_annual}")
@@ -478,14 +411,15 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
                 log_print(logger, f"[GeoServer] Creando store: {store_annual}")
                 geo.create_mosaic(store_annual, annual_dir, props_dir, tmp_root, zip_root)
 
-            # guardar en Mongo
+            # ===== ADICIÓN: guardar en Mongo =====
             _save_mosaic_records_to_mongo(annual_dir, store_annual, src_lower)
+
         else:
             log_print(logger, f"[GeoServer] Carpeta ANUAL no encontrada, se omite: {annual_dir}", level="warning")
 
         # === ACUMULADO ===
         if os.path.isdir(cumulative_dir):
-            store_cum = f"{src_lower}_deforestation_cumulative".lower()
+            store_cum = f"{src_lower}_deforestation_cumulative"
             store_obj = geo.get_store(store_cum)
             if store_obj:
                 log_print(logger, f"[GeoServer] Actualizando store existente: {store_cum}")
@@ -494,8 +428,9 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
                 log_print(logger, f"[GeoServer] Creando store: {store_cum}")
                 geo.create_mosaic(store_cum, cumulative_dir, props_dir, tmp_root, zip_root)
 
-            # guardar en Mongo
+            # ===== ADICIÓN: guardar en Mongo =====
             _save_mosaic_records_to_mongo(cumulative_dir, store_cum, src_lower)
+
         else:
             log_print(logger, f"[GeoServer] Carpeta ACUMULADA no encontrada, se omite: {cumulative_dir}", level="warning")
 
@@ -503,4 +438,4 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
 
     except Exception as e:
         log_print(logger, f"[GeoServer] Error en publicación: {e}", level="error")
-        raise
+        # raise
