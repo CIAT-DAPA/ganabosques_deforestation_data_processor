@@ -1,4 +1,4 @@
-########## Brayan Mora A. ########## 
+########## Brayan Mora A. ##########
 ##########  5/04/2025     ##########
 ####################################
 
@@ -9,7 +9,7 @@ from rasterio.errors import RasterioIOError
 import numpy as np
 from datetime import datetime
 import logging
-import re  # <-- Import necesario para trabajar con patrones de nombres
+import re
 from tools.log_print import log_print  # Asegúrate que esta ruta sea correcta
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def quality_control(input_dir, output_dir):
                 with rasterio.open(raster_path) as src:
                     array = src.read(1)
                     nodata = src.nodata
-                    crs = src.crs
+                    crs = src.crs  # (si quieres luego validar CRS, aquí ya está)
 
                 # Validación de contenido
                 if nodata is not None:
@@ -52,35 +52,25 @@ def quality_control(input_dir, output_dir):
                     resultados_log.append(mensaje)
                     log_print(logger, mensaje)
 
-                    # ================= LÓGICA DE RENOMBRADO =================
-                    # Queremos que:
-                    #   smbyc_2010-2012.tif  -> smbyc_2010-01-01-2012-01-01.tif
-                    #   smbyc_2012-2013.tif  -> smbyc_2012-01-01-2013-01-01.tif
-                    # Y si ya viene como smbyc_2010-01-01-2012-01-01.tif, lo dejamos igual.
+                    # ================= LÓGICA DE RENOMBRADO (SOLO AÑOS) =================
+                    # Solo aceptamos/normalizamos nombres tipo:
+                    #   smbyc_2010-2012.tif
+                    # Si NO coincide con ese patrón, lo copiamos con el nombre original.
 
                     nombre_base, extension = os.path.splitext(archivo)
 
-                    # Caso 1: ya tiene el formato completo YYYY-MM-DD-YYYY-MM-DD => lo dejamos igual
-                    patron_completo = r".+_\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}"
-                    if re.fullmatch(patron_completo, nombre_base):
-                        nuevo_nombre = archivo  # sin cambios
-                    else:
-                        # Caso 2: formato corto tipo smbyc_2010-2012
-                        patron_corto = r"(.+?)_(\d{4})-(\d{4})"
-                        m = re.fullmatch(patron_corto, nombre_base)
-                        if m:
-                            prefijo = m.group(1)   # smbyc
-                            anio_ini = m.group(2)  # 2010
-                            anio_fin = m.group(3)  # 2012
+                    patron_corto = r"(.+?)_(\d{4})-(\d{4})"
+                    m_corto = re.fullmatch(patron_corto, nombre_base)
 
-                            nuevo_nombre_base = f"{prefijo}_{anio_ini}-01-01-{anio_fin}-01-01"
-                            nuevo_nombre = nuevo_nombre_base + extension
-                        else:
-                            # Si no cumple ningún patrón, dejamos el nombre original
-                            nuevo_nombre = archivo
+                    if m_corto:
+                        # Ya está en formato corto -> no cambiamos
+                        nuevo_nombre = archivo
+                    else:
+                        # No intentamos convertir otros formatos (incluye el completo)
+                        nuevo_nombre = archivo
 
                     nombre_salida = os.path.join(output_dir, nuevo_nombre)
-                    # ========================================================
+                    # ===================================================================
 
                     shutil.copy(raster_path, nombre_salida)
                     procesados += 1
@@ -119,3 +109,4 @@ def quality_control(input_dir, output_dir):
         log_file.write("\n".join(resumen))
 
     return True if procesados > 0 else False
+

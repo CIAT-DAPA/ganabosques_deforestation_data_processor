@@ -40,8 +40,8 @@ def get_data(years, output_path, geo, workspace, mosaic):
                     end_year = year + 1        # 2013  -> smbyc_2012-01-01-2013-01-01.tif
 
                 # Ahora construimos las fechas completas para el nombre del archivo
-                start_date_str = f"{start_year}0101"
-                end_date_str = f"{end_year}0101"
+                start_date_str = f"{start_year}"
+                end_date_str = f"{end_year}"
 
                 # Nombre final del archivo .tif
                 output_file = os.path.join(

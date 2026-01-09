@@ -65,7 +65,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
 
             output_filename = (
                 f"smbyc_deforestation_annual_"
-                f"{year_start}0101-{year_end}0101.tif"
+                f"{year_start}-{year_end}.tif"
             )
             output_path = os.path.join(
                 output_folder,
@@ -130,7 +130,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
 
                     cum_filename = (
                         f"smbyc_deforestation_cumulative_"
-                        f"{start_year}0101-{end_year}0101.tif"
+                        f"{start_year}-{end_year}.tif"
                     )
                     cum_path = os.path.join(cumulative_folder, cum_filename)
 
@@ -148,7 +148,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
                         # Ahora el nombre del previo debe ser 2010-{prev_year_end}
                         prev_cum_filename = (
                             f"smbyc_deforestation_cumulative_"
-                            f"{start_year}0101-{prev_year_end}0101.tif"
+                            f"{start_year}-{prev_year_end}.tif"
                         )
                         prev_cum_path = os.path.join(cumulative_folder, prev_cum_filename)
 
