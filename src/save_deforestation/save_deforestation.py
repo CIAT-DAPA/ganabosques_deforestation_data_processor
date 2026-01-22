@@ -280,12 +280,12 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
     store_name_norm = (store_name or "").lower().strip()
 
     # Determinar deforestation_type basado en el nombre del store
-    if "quarterly" in store_name_norm or "trimestral" in store_name_norm:
-        deforestation_type = DeforestationType.QUARTERLY
-    elif "annual" in store_name_norm:
+    if "annual" in store_name_norm:
         deforestation_type = DeforestationType.ANNUAL
-    else:
+    elif "cumulative" in store_name_norm:
         deforestation_type = DeforestationType.CUMULATIVE
+    else:
+        deforestation_type = DeforestationType.QUARTERLY
 
     # Determinar deforestation_source
     source_lower = source_value.lower().strip()
