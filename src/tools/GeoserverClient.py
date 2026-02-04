@@ -6,9 +6,6 @@ import shutil
 from geoserver.catalog import Catalog
 from geoserver.resource import Coverage
 from geoserver.support import DimensionInfo
-import time
-
-# https://github.com/dimitri-justeau/gsconfig-py3
 
 
 class GeoserverClient(object):
@@ -48,6 +45,15 @@ class GeoserverClient(object):
 
     def get_store(self, store_name):
         if self.workspace:
+            """
+            store = self.catalog.get_store(store_name, self.workspace)
+            if store:
+                print("Store found")
+                return store
+            else:
+                print("Store not found:", store_name)
+                return None
+            """
             try:
                 store = self.catalog.get_store(store_name, self.workspace)
                 return store
@@ -57,9 +63,17 @@ class GeoserverClient(object):
         else:
             print("Workspace not found:", store_name)
             return None
+        
+    def get_stores(self):
+        if self.workspace:
+            try:
+                stores = self.catalog.get_stores(self.workspace)
+                return stores
+            except Exception as err:
+                print("Stores not found in:", self.workspace)
+                return None
 
-    def zip_files(self, folder, folder_properties, folder_tmp):
-        print("primero "+ folder)
+    def zip_files(self, folder, folder_properties, folder_tmp, zip_path):
         if os.path.exists(folder) and os.path.exists(folder_properties):
 
             if os.path.exists(folder_tmp):
@@ -78,19 +92,18 @@ class GeoserverClient(object):
 
             # Copying rasters
             files = glob.glob(os.path.join(folder, "*.*"))
-            print(f'el folder es: {files}')
             for file in files:
                 f = file.rsplit(os.path.sep, 1)[-1]
                 shutil.copyfile(file, os.path.join(folder_tmp, f))
 
             zip_name = "mosaic.zip"  # zip file name
             list_files = glob.glob(os.path.join(folder_tmp, "*.*"))
-            zip = ZipFile(zip_name, mode="w")
+            zip = ZipFile(os.path.join(zip_path, zip_name), mode="w")
             print("Zipping")
             for f in list_files:
                 zip.write(f, f.rsplit(os.path.sep, 1)[-1])
             zip.close()
-            zip_path = os.path.join(os.getcwd(), zip_name)
+            zip_path = os.path.join(zip_path, zip_name)
             print("zip:",zip_path)
             return zip_path
         else:
@@ -99,8 +112,8 @@ class GeoserverClient(object):
             print(folder_properties, os.path.exists(folder_properties))
             return None
 
-    def create_mosaic(self, store_name, file, folder_properties, folder_tmp):
-        output = self.zip_files(file, folder_properties, folder_tmp)
+    def create_mosaic(self, store_name, file, folder_properties, folder_tmp, zip_path):
+        output = self.zip_files(file, folder_properties, folder_tmp, zip_path)
         #print(output)
         self.catalog.create_imagemosaic(store_name, output, workspace=self.workspace)
         print(f"Mosaic store : {store_name} is created!")
@@ -129,9 +142,8 @@ class GeoserverClient(object):
         print("Time Dimension is enabled")
         print("Done Successfully!")
 
-    def update_mosaic(self, store, file, folder_properties, folder_tmp):
-        print("hola si")
-        output = self.zip_files(file, folder_properties, folder_tmp)
+    def update_mosaic(self, store, file, folder_properties, folder_tmp, zip_path):
+        output = self.zip_files(file, folder_properties, folder_tmp, zip_path)
         self.catalog.harvest_uploadgranule(output, store)
         print("Mosaic updated")
 
@@ -154,29 +166,3 @@ class GeoserverClient(object):
             elif os.path.isdir(file_path):
                 print("deleting folder:", file_path)
                 shutil.rmtree(file_path)
-
-    def upload_mosaic(self, zip_path, store_name):
-        """
-        Subir el mosaico (zip) al GeoServer con reintentos en caso de fallo de conexión.
-        """
-        full_zip_path = "D:\\OneDrive - CGIAR\\Desktop\\ganabosques\\import_mosaic\\aclimate_scripts_tools\\geoserver\\upload_mosaics\\mosaic.zip"
-
-        # Verificamos si el archivo existe
-        if os.path.exists(full_zip_path):
-            print(f"Subiendo el archivo ZIP desde la ruta: {full_zip_path} al Geoserver...")
-            retries = 3  # Número de reintentos
-            for attempt in range(retries):
-                try:
-                    # Intentamos subir el archivo
-                    self.catalog.create_imagemosaic(store_name, full_zip_path, workspace=self.workspace)
-                    print(f"Mosaico {store_name} subido correctamente.")
-                    break  # Salir del bucle si la subida es exitosa
-                except Exception as e:
-                    print(f"Error al subir el mosaico: {str(e)}")
-                    if attempt < retries - 1:  # Si no es el último intento, reintentar
-                        print("Reintentando...")
-                        time.sleep(5)  # Esperar 5 segundos antes de intentar nuevamente
-                    else:
-                        print("Reintentos agotados. No se pudo subir el mosaico.")
-        else:
-            print(f"No se encontró el archivo ZIP en la ruta especificada: {full_zip_path}")

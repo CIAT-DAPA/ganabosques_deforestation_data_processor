@@ -1,0 +1,1 @@
+from .get_data_smbyc import get_data
