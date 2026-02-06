@@ -25,7 +25,18 @@ def extract_years_from_filename(filename):
         raise ValueError(f"No se encontraron años válidos en el nombre del archivo: {filename}")
 
 
-def deforestation_calc(input_folder, output_folder, source, deforestation_value=None):
+def deforestation_calc(input_folder, output_folder, source, deforestation_type=None, deforestation_value=None):
+    """
+    Calcula deforestación anual y acumulada desde archivos SMBYC procesados.
+    Solo procesa la subcarpeta 'smbyc/' dentro de input_folder.
+    
+    Args:
+        input_folder: Carpeta base con subcarpetas por tipo (smbyc/, nad/, atd/)
+        output_folder: Carpeta base de salida
+        source: Fuente de datos (siempre 'smbyc')
+        deforestation_type: Tipo de deforestación ('annual' o 'cumulative')
+        deforestation_value: Valor de deforestación a filtrar (por defecto 2 para SMBYC)
+    """
     os.makedirs(output_folder, exist_ok=True)
     log_path = os.path.join(output_folder, 'log_parte1.txt')
     log_lines = []
@@ -44,7 +55,18 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
         raise ValueError(error_msg)
 
     value_to_filter = 2 if source == DeforestationSource.SMBYC.value else deforestation_value
-    tif_files = sorted([f for f in os.listdir(input_folder) if f.endswith('.tif')])
+    
+    # Procesar solo la subcarpeta 'smbyc' donde están los datos anuales de SMByC
+    smbyc_subfolder = os.path.join(input_folder, "smbyc")
+    if not os.path.exists(smbyc_subfolder):
+        error_msg = f"ERROR: No existe la carpeta de entrada: {smbyc_subfolder}"
+        log_lines.append(error_msg)
+        log_print(logger, error_msg, level='error')
+        with open(log_path, 'w') as log_file:
+            log_file.writelines('\n'.join(log_lines))
+        raise FileNotFoundError(error_msg)
+    
+    tif_files = sorted([f for f in os.listdir(smbyc_subfolder) if f.endswith('.tif')])
     processed_layers = []
     output_years = []
 
@@ -57,7 +79,7 @@ def deforestation_calc(input_folder, output_folder, source, deforestation_value=
     # PROCESAMIENTO "ANUAL"
     # =========================
     for tif in tqdm(tif_files, desc="Procesando deforestación anual", unit="archivo"):
-        input_path = os.path.join(input_folder, tif)
+        input_path = os.path.join(smbyc_subfolder, tif)
 
         try:
             year_start, year_end = extract_years_from_filename(tif)

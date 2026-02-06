@@ -28,7 +28,58 @@ def _apply_nad_atd_reclass_block(data):
     out[mask] = 2.0
     return out
 
-def mdl_spatial_processing(input_folder, output_folder, source=None):
+def mdl_spatial_processing(input_folder, output_folder, source=None, deforestation_type=None):
+    """
+    Procesamiento espacial de rasters.
+    Procesa subcarpetas según el tipo: smbyc/, nad/, atd/
+    Si deforestation_type es None, procesa todas las subcarpetas disponibles.
+    
+    Args:
+        input_folder: Carpeta base de entrada
+        output_folder: Carpeta base de salida
+        source: Fuente de datos (legacy, se mantiene por compatibilidad)
+        deforestation_type: Tipo de deforestación (annual, cumulative, nad, atd)
+    """
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # Determinar qué subcarpetas procesar
+    if deforestation_type:
+        if deforestation_type.lower() in ["annual", "cumulative"]:
+            folders_to_process = {"smbyc": False}  # False = no es NAD/ATD
+        else:
+            folders_to_process = {deforestation_type.lower(): True}  # True = es NAD/ATD
+    else:
+        # Buscar todas las subcarpetas disponibles
+        folders_to_process = {}
+        for folder in ["smbyc", "nad", "atd"]:
+            if os.path.isdir(os.path.join(input_folder, folder)):
+                is_nad_atd = folder in ["nad", "atd"]
+                folders_to_process[folder] = is_nad_atd
+    
+    if not folders_to_process:
+        log_print(logger, "No se encontraron carpetas para procesar.", level='warning')
+        return False
+    
+    log_print(logger, f"Procesando carpetas: {list(folders_to_process.keys())}")
+    
+    all_success = True
+    for folder_name, is_nad_atd in folders_to_process.items():
+        input_subfolder = os.path.join(input_folder, folder_name)
+        output_subfolder = os.path.join(output_folder, folder_name)
+        
+        if not os.path.isdir(input_subfolder):
+            log_print(logger, f"Carpeta no encontrada: {input_subfolder}", level="warning")
+            continue
+        
+        os.makedirs(output_subfolder, exist_ok=True)
+        success = _process_spatial_folder(input_subfolder, output_subfolder, folder_name, is_nad_atd)
+        if not success:
+            all_success = False
+    
+    return all_success
+
+
+def _process_spatial_folder(input_folder, output_folder, folder_name, is_nad_atd):
     os.makedirs(output_folder, exist_ok=True)
     log_path = os.path.join(output_folder, 'log_procesamiento.txt')
 
@@ -75,7 +126,7 @@ def mdl_spatial_processing(input_folder, output_folder, source=None):
                 res_src = src.res
 
                 # Para NAD/ATD: usar el mismo método que data_nad_atd.py
-                if source and source.lower() in ["nad", "atd"]:
+                if is_nad_atd:
                     # Transformar coordenadas de EPSG:4326 a EPSG:3116 (metros)
                     src_crs_proj = CRS.from_epsg(4326)
                     dst_crs_obj = CRS.from_string(dst_crs)
@@ -110,7 +161,7 @@ def mdl_spatial_processing(input_folder, output_folder, source=None):
                 })
                 
                 # Para NAD/ATD: configurar dtype y nodata correctamente para float32
-                if source and source.lower() in ["nad", "atd"]:
+                if is_nad_atd:
                     kwargs.update({
                         'dtype': 'float32',
                         'nodata': np.nan
@@ -126,12 +177,12 @@ def mdl_spatial_processing(input_folder, output_folder, source=None):
                             dst_crs=dst_crs,
                             dst_transform=out_transform,
                             resampling=warp.Resampling.nearest,
-                            num_threads=4 if source and source.lower() in ["nad", "atd"] else 2,
+                            num_threads=4 if is_nad_atd else 2,
                             warp_mem_limit=512 #if source and source.lower() in ["nad", "atd"] else None
                         )
 
             # Reclasificación para NAD/ATD: valores > 0 -> 2.0, resto -> NaN
-            if source and source.lower() in ["nad", "atd"]:
+            if is_nad_atd:
                 log_print(logger, f"Aplicando reclasificación NAD/ATD a: {nuevo_nombre}")
                 with rio.open(output_path, "r+") as dst:
                     for _, window in dst.block_windows(1):

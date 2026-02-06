@@ -226,7 +226,7 @@ def _parse_period_from_filename(filename: str) -> Tuple[date, date]:
     if m:
         year = int(m.group(1))
         start_dt = date(year, 1, 1)
-        end_dt = date(year, 12, 31)
+        end_dt = date(year, 1, 1)
         return start_dt, end_dt
 
     # 3. Formato RANGO AÑOS: _YYYY-YYYY.tif (SMBYC 2010-2012)
@@ -235,7 +235,7 @@ def _parse_period_from_filename(filename: str) -> Tuple[date, date]:
         start_year = int(m.group(1))
         end_year = int(m.group(2))
         start_dt = date(start_year, 1, 1)
-        end_dt = date(end_year, 12, 31)
+        end_dt = date(end_year, 1, 1)
         return start_dt, end_dt
 
     # 4. Formato YYYYMMDD-YYYYMMDD.tif
@@ -280,20 +280,21 @@ def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_valu
     store_name_norm = (store_name or "").lower().strip()
 
     # Determinar deforestation_type basado en el nombre del store
-    if "annual" in store_name_norm:
+    # Con el nuevo modelo: tipos son annual, cumulative, nad, atd
+    if "nad" in store_name_norm:
+        deforestation_type = DeforestationType.NAD
+    elif "atd" in store_name_norm:
+        deforestation_type = DeforestationType.ATD
+    elif "annual" in store_name_norm:
         deforestation_type = DeforestationType.ANNUAL
     elif "cumulative" in store_name_norm:
         deforestation_type = DeforestationType.CUMULATIVE
     else:
-        deforestation_type = DeforestationType.QUARTERLY
-
-    # Determinar deforestation_source
-    source_lower = source_value.lower().strip()
-    try:
-        deforestation_source = DeforestationSource[source_lower.upper()]
-    except KeyError:
-        log_print(logger, f"[Mongo] ⚠ Fuente desconocida: {source_value}", level="warning")
+        log_print(logger, f"[Mongo] ⚠ No se pudo determinar tipo de deforestación para store: {store_name_norm}", level="warning")
         return
+
+    # La fuente SIEMPRE es SMBYC (modelo nuevo)
+    deforestation_source = DeforestationSource.SMBYC
 
     tifs = _list_tifs(rasters_dir)
     if not tifs:
@@ -467,14 +468,21 @@ class GeoserverClient:
 # ──────────────────────────────────────────────────────────────────────────────
 # API principal usada por el main
 # ──────────────────────────────────────────────────────────────────────────────
-def process_geoserver_mosaics(output_path_deforestation: str, source: str):
+def process_geoserver_mosaics(output_path_deforestation: str, source: str, deforestation_type: str = None):
     """
-    Publica/actualiza mosaicos 'annual' y 'cumulative' para la fuente dada (p.ej. 'SMBYC').
+    Publica/actualiza mosaicos para la fuente y tipo(s) especificado(s).
+    
+    Args:
+        output_path_deforestation: Ruta base de salida
+        source: Fuente de datos (ej: 'smbyc')
+        deforestation_type: Tipo específico a procesar ('annual', 'cumulative', 'nad', 'atd').
+                           Si es None, procesa todos los tipos disponibles.
 
     - Usa properties EXTERNAS (indexer.properties + timeregex.properties).
     - Crea mosaico con ZIP(TIF+PROPS).
     - Si existe, actualiza con harvest ZIP(solo TIF).
     - Guarda registros en Mongo (colección deforestation) con period_start/period_end parseado.
+    - Estructura: {source}_deforestation_{type}
     """
     try:
         gs_url = _ensure_rest_url(config.get("URL_GEO") or "")
@@ -487,29 +495,58 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
 
         src_lower = (source or "").lower().strip()
 
-        annual_dir = os.path.join(output_path_deforestation, f"{src_lower}_deforestation_annual")
-        cumulative_dir = os.path.join(output_path_deforestation, f"{src_lower}_deforestation_cumulative")
-        
-        general_dir = os.path.join(output_path_deforestation, f"{src_lower}_deforestation")
+        # Determinar qué tipos procesar
+        if deforestation_type:
+            types_to_process = [deforestation_type.lower()]
+            log_print(logger, f"[GeoServer] Procesando solo tipo: {deforestation_type}")
+        else:
+            types_to_process = ["annual", "cumulative", "nad", "atd"]
+            log_print(logger, f"[GeoServer] Procesando todos los tipos disponibles")
+
+        # Mapeo de carpetas por tipo: {tipo: (carpeta, store_name, tipo_orm)}
+        type_mapping = {
+            "annual": (
+                os.path.join(output_path_deforestation, f"{src_lower}_deforestation_annual"),
+                f"{src_lower}_deforestation_annual",
+                DeforestationType.ANNUAL
+            ),
+            "cumulative": (
+                os.path.join(output_path_deforestation, f"{src_lower}_deforestation_cumulative"),
+                f"{src_lower}_deforestation_cumulative",
+                DeforestationType.CUMULATIVE
+            ),
+            "nad": (
+                os.path.join(output_path_deforestation, f"{src_lower}_deforestation_nad"),
+                f"{src_lower}_deforestation_nad",
+                DeforestationType.NAD
+            ),
+            "atd": (
+                os.path.join(output_path_deforestation, f"{src_lower}_deforestation_atd"),
+                f"{src_lower}_deforestation_atd",
+                DeforestationType.ATD
+            ),
+        }
 
         # ===== Properties EXTERNAS =====
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         utils_dir = os.path.normpath(os.path.join(BASE_DIR, "..", "utils"))
 
-        # Buscar carpeta de propiedades que contenga el source
-        # (ej: si source="nad", busca "properties_nad_atd" o "properties_nad")
+        # Buscar carpeta de propiedades para esta fuente
+        # (ej: properties_smbyc, properties_nad_atd)
         props_dir = None
         if os.path.isdir(utils_dir):
             for folder in os.listdir(utils_dir):
                 folder_path = os.path.join(utils_dir, folder)
-                if os.path.isdir(folder_path) and folder.startswith("properties_") and src_lower in folder:
-                    props_dir = folder_path
-                    break
+                if os.path.isdir(folder_path) and folder.startswith("properties_"):
+                    # Intenta detectar si contiene el source o tipos relacionados
+                    if src_lower in folder or any(t in folder for t in types_to_process):
+                        props_dir = folder_path
+                        break
 
         if not props_dir:
             raise FileNotFoundError(
                 f"No se encontró carpeta de propiedades para source='{src_lower}' en {utils_dir}. "
-                "Esperaba una carpeta del tipo 'properties_*' que contenga '{src_lower}'."
+                "Esperaba una carpeta del tipo 'properties_*' compatible."
             )
 
         _check_external_properties(props_dir)
@@ -525,54 +562,31 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str):
         geo.connect()
         geo.get_workspace(ws_name)
 
-        # === ANUAL ===
-        if os.path.isdir(annual_dir):
-            store_annual = f"{src_lower}_deforestation_annual".lower()
-            store_obj = geo.get_store(store_annual)
+        # Procesar cada tipo solicitado
+        for type_key in types_to_process:
+            if type_key not in type_mapping:
+                log_print(logger, f"[GeoServer] ⚠ Tipo desconocido: {type_key}", level="warning")
+                continue
+
+            type_dir, store_name, type_enum = type_mapping[type_key]
+
+            if not os.path.isdir(type_dir):
+                log_print(logger, f"[GeoServer] Carpeta no encontrada, se omite: {type_dir}", level="warning")
+                continue
+
+            log_print(logger, f"[GeoServer] Procesando tipo: {type_key.upper()} ({store_name})")
+
+            store_obj = geo.get_store(store_name)
             if store_obj:
-                log_print(logger, f"[GeoServer] Actualizando store existente: {store_annual}")
-                geo.update_mosaic(store_obj, annual_dir, tmp_root, zip_root)
+                log_print(logger, f"[GeoServer] Actualizando store existente: {store_name}")
+                geo.update_mosaic(store_obj, type_dir, tmp_root, zip_root)
             else:
-                log_print(logger, f"[GeoServer] Creando store: {store_annual}")
-                geo.create_mosaic(store_annual, annual_dir, props_dir, tmp_root, zip_root)
+                log_print(logger, f"[GeoServer] Creando store: {store_name}")
+                geo.create_mosaic(store_name, type_dir, props_dir, tmp_root, zip_root)
 
-            # guardar en Mongo
-            _save_mosaic_records_to_mongo(annual_dir, store_annual, src_lower)
-        else:
-            log_print(logger, f"[GeoServer] Carpeta ANUAL no encontrada, se omite: {annual_dir}", level="warning")
+            # Guardar en Mongo (fuente siempre desde parámetro source)
+            _save_mosaic_records_to_mongo(type_dir, store_name, src_lower)
 
-        # === ACUMULADO ===
-        if os.path.isdir(cumulative_dir):
-            store_cum = f"{src_lower}_deforestation_cumulative".lower()
-            store_obj = geo.get_store(store_cum)
-            if store_obj:
-                log_print(logger, f"[GeoServer] Actualizando store existente: {store_cum}")
-                geo.update_mosaic(store_obj, cumulative_dir, tmp_root, zip_root)
-            else:
-                log_print(logger, f"[GeoServer] Creando store: {store_cum}")
-                geo.create_mosaic(store_cum, cumulative_dir, props_dir, tmp_root, zip_root)
-
-            # guardar en Mongo
-            _save_mosaic_records_to_mongo(cumulative_dir, store_cum, src_lower)
-        else:
-            log_print(logger, f"[GeoServer] Carpeta ACUMULADA no encontrada, se omite: {cumulative_dir}", level="warning")
-
-        # === GENERAL (opcional) ===
-
-        if os.path.isdir(general_dir):
-            store_gen = f"{src_lower}_deforestation".lower()
-            store_obj = geo.get_store(store_gen)
-            if store_obj:
-                log_print(logger, f"[GeoServer] Actualizando store existente: {store_gen}")
-                geo.update_mosaic(store_obj, general_dir, tmp_root, zip_root)
-            else:
-                log_print(logger, f"[GeoServer] Creando store: {store_gen}")
-                geo.create_mosaic(store_gen, general_dir, props_dir, tmp_root, zip_root)
-
-            # guardar en Mongo
-            _save_mosaic_records_to_mongo(general_dir, store_gen, src_lower)
-        else:
-            log_print(logger, f"[GeoServer] Carpeta GENERAL no encontrada, se omite: {general_dir}", level="warning")
         log_print(logger, "[GeoServer] Publicación completada + Mongo actualizado.")
 
     except Exception as e:
