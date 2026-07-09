@@ -10,7 +10,7 @@ config['URL_GEO'] = os.getenv("URL_GEO")
 config['WORKSPACE'] = os.getenv('WORKSPACE')
 config['GEO_USER'] = os.getenv("GEO_USER")
 config['GEO_PWD'] = os.getenv("GEO_PWD")
-config['GEO_WORKSPACE'] = os.getenv("GEO_WORKSPACE")
+config['GEO_WORKSPACE'] = os.getenv("GEO_WORKSPACE_DEFORESTATION")
 config['MONGO_DB_NAME'] = os.getenv("MONGO_DB_NAME")
 config['MONGO_URI'] = os.getenv("MONGO_URI")
 
