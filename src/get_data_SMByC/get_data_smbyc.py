@@ -8,20 +8,40 @@ from tools.log_print import log_print  # Asegúrate que la ruta sea correcta
 # Configuración del logger del módulo
 logger = logging.getLogger("get data")
 
-def get_data(years, quarters, output_path, geo, workspace, mosaic, source):
+def get_data(years, quarters, output_path, geo, workspace, mosaic, source, deforestation_type=None):
     """
-    Descarga datos según la fuente:
-    - SMBYC: Anual (2010-2012 especial, resto anual)
-    - NAD/ATD: Trimestral según quarters especificados
+    Descarga datos según la fuente y tipo:
+    - source='smbyc' + type='annual'/'cumulative' → Descarga de capa SMBYC a carpeta smbyc/
+    - source='smbyc' + type='nad' → Descarga de capa NAD a carpeta nad/
+    - source='smbyc' + type='atd' → Descarga de capa ATD a carpeta atd/
+    - Sin type especificado → Descarga todos los tipos disponibles
     """
     os.makedirs(output_path, exist_ok=True)
     
-    if source == "smbyc":
-        _download_smbyc(years, output_path, geo, workspace, mosaic)
-    elif source in ["nad", "atd"]:
-        _download_nad_atd(years, quarters, output_path, geo, workspace, mosaic, source)
+    # Determinar qué tipos procesar
+    if deforestation_type:
+        types_to_process = [deforestation_type.lower()]
     else:
-        log_print(logger, f"Source desconocido: {source}", level="error")
+        types_to_process = ["annual", "cumulative", "nad", "atd"]
+    
+    for dtype in types_to_process:
+        if dtype in ["annual", "cumulative"]:
+            # Descargar de capa SMBYC a carpeta smbyc/
+            type_folder = os.path.join(output_path, "smbyc")
+            os.makedirs(type_folder, exist_ok=True)
+            _download_smbyc(years, type_folder, geo, workspace, "smbyc")
+        elif dtype == "nad":
+            # Descargar de capa NAD a carpeta nad/
+            type_folder = os.path.join(output_path, "nad")
+            os.makedirs(type_folder, exist_ok=True)
+            _download_nad_atd(years, quarters, type_folder, geo, workspace, "nad", "nad")
+        elif dtype == "atd":
+            # Descargar de capa ATD a carpeta atd/
+            type_folder = os.path.join(output_path, "atd")
+            os.makedirs(type_folder, exist_ok=True)
+            _download_nad_atd(years, quarters, type_folder, geo, workspace, "atd", "atd")
+        else:
+            log_print(logger, f"Tipo desconocido: {dtype}", level="error")
 
 
 def _download_smbyc(years, output_path, geo, workspace, mosaic):

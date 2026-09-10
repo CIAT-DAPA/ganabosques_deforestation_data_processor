@@ -9,8 +9,9 @@ from save_deforestation import process_geoserver_mosaics
 from get_data_SMByC import get_data
 from tools.log_print import log_print
 from ganabosques_orm.enums.deforestationsource import DeforestationSource
+from ganabosques_orm.enums.deforestationtype import DeforestationType
 from config import config
-import rasterio
+import shutil
 import numpy as np
 
 # ===== Helpers =====
@@ -64,9 +65,9 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
-def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,5}):
+def main(years, source, deforestation_type=None, quarters=None, deforestation_value=None, steps={1,2,3,4,5}):
     try:
-        log_print(logger, f"Iniciando pipeline para source={source} (steps={sorted(steps)})")
+        log_print(logger, f"Iniciando pipeline para source={source}, type={deforestation_type} (steps={sorted(steps)})")
 
         # ===== Carpetas organizadas por source =====
         source_base = os.path.join(base_path, source)
@@ -85,7 +86,8 @@ def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,
                 geo=config['URL_GEO'],
                 workspace=config['GEO_WORKSPACE'],
                 mosaic=source,
-                source=source
+                source=source,
+                deforestation_type=deforestation_type
             )
         else:
             log_print(logger, "Paso 1 omitido.")
@@ -95,7 +97,8 @@ def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,
             log_print(logger, "Paso 2: Validación de calidad…")
             ok = quality_control(
                 input_dir=output_path_get_data,
-                output_dir=output_path_quality
+                output_dir=output_path_quality,
+                deforestation_type=deforestation_type
             )
             if not ok:
                 log_print(logger, "Fallo en calidad. Abortando.", level="error")
@@ -109,7 +112,8 @@ def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,
             ok = mdl_spatial_processing(
                 input_folder=output_path_quality,
                 output_folder=output_path_spatial,
-                source=source
+                source=source,
+                deforestation_type=deforestation_type
             )
             if not ok:
                 log_print(logger, "Fallo en validación espacial. Abortando.", level="error")
@@ -119,25 +123,28 @@ def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,
 
         # ===== Paso 4: Cálculo de deforestación / Preparación final =====
         if 4 in steps:
-            if source == DeforestationSource.SMBYC.value:
+            if deforestation_type in [DeforestationType.ANNUAL.value, DeforestationType.CUMULATIVE.value]:
                 log_print(logger, "Paso 4: Calcular deforestación…")
                 deforestation_calc(
                     input_folder=output_path_spatial,
                     output_folder=output_path_deforestation,
                     source=source,
+                    deforestation_type=deforestation_type,
                     deforestation_value=deforestation_value
                 )
-            else:
+            elif deforestation_type in [DeforestationType.NAD.value, DeforestationType.ATD.value]:
                 # Para NAD/ATD: copiar/renombrar archivos finales
-                log_print(logger, f"Paso 4: Preparar archivos finales para {source}…")
-                _prepare_nad_atd_files(output_path_spatial, output_path_deforestation, source)
+                log_print(logger, f"Paso 4: Preparar archivos finales para {deforestation_type}…")
+                _prepare_nad_atd_files(output_path_spatial, output_path_deforestation, deforestation_type)
+            else:
+                log_print(logger, f"⚠ Tipo de deforestación '{deforestation_type}' no reconocido, omitiendo paso 4", level="warning")
         else:
             log_print(logger, "Paso 4 omitido.")
 
         # ===== Paso 5: Publicar en GeoServer / Guardar en Mongo =====
         if 5 in steps:
             log_print(logger, "Paso 5: Publicar resultados en GeoServer / Mongo…")
-            process_geoserver_mosaics(output_path_deforestation, source)
+            process_geoserver_mosaics(output_path_deforestation, source, deforestation_type)
         else:
             log_print(logger, "Paso 5 omitido.")
 
@@ -147,31 +154,43 @@ def main(years, source, quarters=None, deforestation_value=None, steps={1,2,3,4,
         log_print(logger, f"Error general en el proceso: {e}", level="error")
         raise
 
-def _prepare_nad_atd_files(input_folder, output_folder, source):
+def _prepare_nad_atd_files(input_folder, output_folder, deforestation_type):
     """
     Para NAD/ATD: copia/renombra archivos de spatial_processing
-    a la carpeta final con formato: {source}_deforestation_YYYYQQ.tif
+    a la carpeta final con formato: smbyc_deforestation_{type}_YYYYQQ.tif
     
     Nota: El paso 3 (spatial_processing) ya aplicó la reclasificación 
     (valores > 0 -> 2.0), así que aquí solo copiamos y renombramos.
     """
-    import shutil
-
-    output_folder = os.path.join(output_folder, f"{source}_deforestation")
+    source = DeforestationSource.SMBYC.value
+    
+    # Determinar la subcarpeta de entrada basada en el tipo
+    type_folder_map = {
+        DeforestationType.NAD.value: "nad",
+        DeforestationType.ATD.value: "atd"
+    }
+    type_folder = type_folder_map.get(deforestation_type, deforestation_type)
+    input_subfolder = os.path.join(input_folder, type_folder)
+    
+    output_folder = os.path.join(output_folder, f"{source}_deforestation_{deforestation_type}")
     
     os.makedirs(output_folder, exist_ok=True)
     
-    for filename in os.listdir(input_folder):
+    if not os.path.exists(input_subfolder):
+        log_print(logger, f"⚠ Carpeta de entrada no existe: {input_subfolder}", level="warning")
+        return
+    
+    for filename in os.listdir(input_subfolder):
         if not filename.endswith('.tif'):
             continue
         
         # Esperamos formato: nad_201701.tif o atd_201702.tif
-        # Renombramos a: nad_deforestation_201701.tif
-        if filename.startswith(f"{source}_"):
-            period = filename.replace(f"{source}_", "").replace(".tif", "")
-            new_filename = f"{source}_deforestation_{period}.tif"
+        # Renombramos a: smbyc_deforestation_nad_201701.tif
+        if filename.startswith(f"{type_folder}_"):
+            period = filename.replace(f"{type_folder}_", "").replace(".tif", "")
+            new_filename = f"{source}_deforestation_{deforestation_type}_{period}.tif"
             
-            src_path = os.path.join(input_folder, filename)
+            src_path = os.path.join(input_subfolder, filename)
             dst_path = os.path.join(output_folder, new_filename)
             
             # Simple copia: el archivo ya está reclasificado del paso 3
@@ -181,6 +200,8 @@ def _prepare_nad_atd_files(input_folder, output_folder, source):
 
 if __name__ == "__main__":
     valid_sources = [source.value for source in DeforestationSource]
+    valid_types = [dtype.value for dtype in DeforestationType]
+    
     parser = argparse.ArgumentParser(description="Pipeline de procesamiento de datos de deforestación.")
     parser.add_argument(
         "-y","--years", nargs="+", type=int, required=True,
@@ -191,8 +212,12 @@ if __name__ == "__main__":
         help=f"Fuente de los datos. Opciones: {', '.join(valid_sources)}"
     )
     parser.add_argument(
+        "-t","--type", type=str, required=False, choices=valid_types,
+        help=f"Tipo de deforestación. Opciones: {', '.join(valid_types)}. Si no se especifica, se procesan todos los tipos disponibles."
+    )
+    parser.add_argument(
         "-d","--deforestation_value", type=str,
-        help=f"Nombre de la capa de deforestación (obligatorio si la fuente no es '{DeforestationSource.SMBYC.value}')"
+        help=f"Nombre de la capa de deforestación (obsoleto, se mantiene por compatibilidad)"
     )
     parser.add_argument(
         "-p","--steps", type=str, default=None,
@@ -201,23 +226,28 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "-q","--quarters", type=str, default=None,
-        help="Trimestres a ejecutar: ej. -q 1 2 3 o -q 1-3. Por defecto ejecuta 1-4."
+        help="Trimestres a ejecutar (solo para tipos NAD/ATD): ej. -q 1 2 3 o -q 1-3. Por defecto ejecuta 1-4."
     )
 
     args = parser.parse_args()
     source_enum = DeforestationSource(args.source)
+    type_enum = DeforestationType(args.type) if args.type else None
 
     # Parsear steps y quarters
     requested_steps = parse_steps(args.steps)
     requested_quarters = parse_quarters(args.quarters)
 
-    # Validación condicional para el paso 4 si se ejecuta y la fuente no es SMBYC
-    # if 4 in requested_steps and source_enum != DeforestationSource.SMBYC and not args.deforestation_value:
-    #     parser.error(f"--deforestation_value es obligatorio si ejecutas el paso 4 y la fuente no es '{DeforestationSource.SMBYC.value}'.")
+    # Validación: quarters solo aplica para NAD/ATD
+    if type_enum and type_enum in [DeforestationType.NAD, DeforestationType.ATD]:
+        if not requested_quarters:
+            requested_quarters = [1, 2, 3, 4]  # Por defecto todos
+    elif args.quarters:
+        log_print(logger, f"⚠ --quarters solo aplica para tipos NAD/ATD, se ignorará", level="warning")
 
     main(
         args.years, 
-        args.source, 
+        args.source,
+        deforestation_type=args.type,
         quarters=requested_quarters,
         deforestation_value=args.deforestation_value, 
         steps=requested_steps
