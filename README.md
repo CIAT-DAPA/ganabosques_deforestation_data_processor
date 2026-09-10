@@ -104,7 +104,7 @@ URL_GEO=http://localhost:8600/geoserver
 WORKSPACE=D:/OneDrive - CGIAR/Desktop/ganabosques/deforestacion
 GEO_USER=admin
 GEO_PWD=geoserver
-GEO_WORKSPACE=deforestation
+GEO_WORKSPACE_DEFORESTATION=deforestation
 MONGO_URI=mongodb://localhost:27017
 MONGO_DB_NAME=ganabosques
 ```
@@ -115,7 +115,7 @@ set URL_GEO=http://localhost:8600/geoserver
 set WORKSPACE=D:/OneDrive - CGIAR/Desktop/ganabosques/deforestacion
 set GEO_USER=admin
 set GEO_PWD=geoserver
-set GEO_WORKSPACE=deforestation
+set GEO_WORKSPACE_DEFORESTATION=deforestation
 set MONGO_URI=mongodb://localhost:27017
 set MONGO_DB_NAME=ganabosques
 ```
@@ -127,7 +127,7 @@ export URL_GEO=http:"//localhost:8600/geoserver"
 export WORKSPACE="D:/OneDrive - CGIAR/Desktop/ganabosques/deforestacion"
 export GEO_USER="admin"
 export GEO_PWD="geoserver"
-export GEO_WORKSPACE="deforestation"
+export GEO_WORKSPACE_DEFORESTATION="deforestation"
 export MONGO_URI="mongodb://localhost:27017"
 export MONGO_DB_NAME="ganabosques"
 ```
@@ -136,7 +136,7 @@ export MONGO_DB_NAME="ganabosques"
  - Replace GEO_USER, GEO_PWD with your actual credentials.
  - URL_GEO refers to the URL of the GeoServer instance enabled through Docker.
  - WORKSPACE refers to the local path where the results are to be temporarily stored.
- - GEO_WORKSPACE refers to the name of the GeoServer workspace, which must be created before running the code.
+- GEO_WORKSPACE_DEFORESTATION refers to the name of the GeoServer workspace, which must be created before running the code.
  - MONGO_URI refers to the MongoDB URL enabled through Docker.
  - MONGO_DB_NAME refers to the database where the information is stored within MongoDB.
 

@@ -14,7 +14,51 @@ from tools.log_print import log_print  # Asegúrate que esta ruta sea correcta
 
 logger = logging.getLogger(__name__)
 
-def quality_control(input_dir, output_dir):
+def quality_control(input_dir, output_dir, deforestation_type=None):
+    """
+    Control de calidad para archivos raster.
+    Procesa subcarpetas según el tipo: smbyc/, nad/, atd/
+    Si deforestation_type es None, procesa todas las subcarpetas disponibles.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Determinar qué subcarpetas procesar
+    if deforestation_type:
+        if deforestation_type.lower() in ["annual", "cumulative"]:
+            folders_to_process = ["smbyc"]
+        else:
+            folders_to_process = [deforestation_type.lower()]
+    else:
+        # Buscar todas las subcarpetas disponibles
+        folders_to_process = []
+        for folder in ["smbyc", "nad", "atd"]:
+            if os.path.isdir(os.path.join(input_dir, folder)):
+                folders_to_process.append(folder)
+    
+    if not folders_to_process:
+        log_print(logger, "No se encontraron carpetas para procesar.", level="warning")
+        return False
+    
+    log_print(logger, f"Procesando carpetas: {folders_to_process}")
+    
+    all_success = True
+    for folder_name in folders_to_process:
+        input_subfolder = os.path.join(input_dir, folder_name)
+        output_subfolder = os.path.join(output_dir, folder_name)
+        
+        if not os.path.isdir(input_subfolder):
+            log_print(logger, f"Carpeta no encontrada: {input_subfolder}", level="warning")
+            continue
+        
+        os.makedirs(output_subfolder, exist_ok=True)
+        success = _process_folder(input_subfolder, output_subfolder, folder_name)
+        if not success:
+            all_success = False
+    
+    return all_success
+
+
+def _process_folder(input_dir, output_dir, folder_name):
     os.makedirs(output_dir, exist_ok=True)
     log_path = os.path.join(output_dir, 'log_quality_control.txt')
 
