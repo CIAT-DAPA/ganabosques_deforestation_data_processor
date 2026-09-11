@@ -1,370 +1,273 @@
 """
-Unit tests for quality control and raster validation.
-Tests for: quality_control, raster validation, error handling.
+Pruebas unitarias del paso 2 del pipeline: ``src/quality_control``.
 """
 
-import pytest
-import numpy as np
-import rasterio
-import sys
 import os
-import tempfile
-import shutil
-from pathlib import Path
-from rasterio.transform import from_bounds
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+import numpy as np
+import pytest
+import rasterio
+from rasterio.errors import RasterioIOError
 
-from quality_control.quality_control_deforestation import quality_control, _process_folder
+from quality_control import quality_control
+from quality_control.quality_control_deforestation import _process_folder
 
 
-class TestQualityControl:
-    """Tests for quality_control function."""
-    
-    def test_quality_control_valid_smbyc_raster(self, temp_dir):
-        """Test quality control passes for valid SMBYC raster."""
-        # Create input structure
-        input_dir = os.path.join(temp_dir, "input")
-        smbyc_dir = os.path.join(input_dir, "smbyc")
-        os.makedirs(smbyc_dir)
-        
-        # Create valid raster with deforestation pixels
-        width, height = 32, 32
-        bounds = (-79.22, -3.41, -66.65, 12.58)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.zeros((height, width), dtype=np.float32)
-        data[5:15, 5:15] = 2.0  # Deforestation pixels
-        
-        filepath = os.path.join(smbyc_dir, "smbyc_2020.tif")
-        with rasterio.open(
-            filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=np.float32, crs='EPSG:4326', transform=transform, nodata=np.nan
+def _leer_log(carpeta):
+    with open(
+        os.path.join(carpeta, "log_quality_control.txt"), encoding="utf-8"
+    ) as f:
+        return f.read()
+
+
+class TestQualityControlRuteo:
+    """``quality_control`` decide que subcarpetas procesar segun el tipo."""
+
+    @pytest.mark.parametrize("tipo", ["annual", "cumulative", "ANNUAL", "Cumulative"])
+    def test_tipos_smbyc_procesan_la_carpeta_smbyc(
+        self, temp_dir, raster_factory, tipo
+    ):
+        raster_factory("smbyc_2013.tif", values=2.0, subfolder="in/smbyc")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert quality_control(entrada, salida, deforestation_type=tipo) is True
+        assert os.path.isfile(os.path.join(salida, "smbyc", "smbyc_2013.tif"))
+
+    @pytest.mark.parametrize("tipo", ["nad", "atd"])
+    def test_tipos_trimestrales_procesan_su_propia_carpeta(
+        self, temp_dir, raster_factory, tipo
+    ):
+        raster_factory(f"{tipo}_202401.tif", values=1.0, subfolder=f"in/{tipo}")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert quality_control(entrada, salida, deforestation_type=tipo) is True
+        assert os.path.isfile(os.path.join(salida, tipo, f"{tipo}_202401.tif"))
+
+    def test_sin_tipo_descubre_todas_las_subcarpetas(self, temp_dir, raster_factory):
+        raster_factory("smbyc_2013.tif", values=2.0, subfolder="in/smbyc")
+        raster_factory("nad_202401.tif", values=2.0, subfolder="in/nad")
+        raster_factory("atd_202401.tif", values=2.0, subfolder="in/atd")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert quality_control(entrada, salida) is True
+        for sub in ("smbyc", "nad", "atd"):
+            assert os.path.isdir(os.path.join(salida, sub))
+
+    def test_sin_subcarpetas_devuelve_false(self, temp_dir, capsys):
+        entrada = os.path.join(temp_dir, "in")
+        os.makedirs(entrada)
+        salida = os.path.join(temp_dir, "out")
+
+        assert quality_control(entrada, salida) is False
+        assert "No se encontraron carpetas para procesar" in capsys.readouterr().out
+
+    def test_tipo_pedido_sin_carpeta_en_disco_se_omite(self, temp_dir, capsys):
+        entrada = os.path.join(temp_dir, "in")
+        os.makedirs(entrada)
+        salida = os.path.join(temp_dir, "out")
+
+        # La carpeta 'nad' se solicita pero no existe: se registra y se omite.
+        assert quality_control(entrada, salida, deforestation_type="nad") is True
+        assert "Carpeta no encontrada" in capsys.readouterr().out
+
+    def test_una_carpeta_fallida_marca_todo_como_fallido(
+        self, temp_dir, raster_factory
+    ):
+        raster_factory("smbyc_2013.tif", values=2.0, subfolder="in/smbyc")
+        # nad/ solo tiene un raster vacio -> esa carpeta falla.
+        raster_factory("nad_202401.tif", values=0.0, subfolder="in/nad", nodata=None)
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert quality_control(entrada, salida) is False
+
+    def test_crea_el_directorio_de_salida(self, temp_dir, raster_factory):
+        raster_factory("smbyc_2013.tif", values=2.0, subfolder="in/smbyc")
+        salida = os.path.join(temp_dir, "nueva", "salida")
+
+        quality_control(os.path.join(temp_dir, "in"), salida, deforestation_type="annual")
+
+        assert os.path.isdir(salida)
+
+
+class TestProcessFolderValidacion:
+    """``_process_folder`` valida el contenido de cada raster."""
+
+    def test_raster_valido_se_copia_y_se_registra(self, temp_dir, raster_factory):
+        raster_factory("smbyc_2013.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is True
+        assert os.path.isfile(os.path.join(salida, "smbyc_2013.tif"))
+
+        log = _leer_log(salida)
+        assert "Archivo válido con valores distintos de 0 y nodata." in log
+        assert "Total procesados correctamente: 1" in log
+        assert "Total con errores o vacíos: 0" in log
+
+    def test_raster_solo_ceros_sin_nodata_se_rechaza(self, temp_dir, raster_factory):
+        # nodata=None ejercita la rama `valores_validos = array[array != 0]`.
+        raster_factory("vacio.tif", values=0.0, subfolder="in", nodata=None)
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is False
+        assert not os.path.exists(os.path.join(salida, "vacio.tif"))
+        assert "Archivo sin valores válidos" in _leer_log(salida)
+
+    def test_raster_solo_nodata_se_rechaza(self, temp_dir, raster_factory):
+        raster_factory("solo_nodata.tif", values=-9999.0, subfolder="in", nodata=-9999.0)
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is False
+        assert "Archivo sin valores válidos" in _leer_log(salida)
+
+    def test_raster_mixto_valido(self, temp_dir, raster_factory):
+        datos = np.zeros((8, 8), dtype="float32")
+        datos[0, 0] = 2.0
+        raster_factory("mixto.tif", values=datos, subfolder="in", nodata=0.0)
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is True
+        assert os.path.isfile(os.path.join(salida, "mixto.tif"))
+
+    def test_carpeta_sin_tif_devuelve_false(self, temp_dir):
+        entrada = os.path.join(temp_dir, "in")
+        os.makedirs(entrada)
+        with open(os.path.join(entrada, "notas.txt"), "w") as f:
+            f.write("no soy un raster")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is False
+        assert "No se encontraron archivos .tif o .tiff" in _leer_log(salida)
+
+    def test_acepta_extension_tiff_y_mayusculas(self, temp_dir, raster_factory):
+        raster_factory("capa.TIFF", values=2.0, subfolder="in")
+        raster_factory("otra.TIF", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        assert _process_folder(entrada, salida, "smbyc") is True
+        assert "Total procesados correctamente: 2" in _leer_log(salida)
+
+    def test_mezcla_de_validos_e_invalidos(self, temp_dir, raster_factory):
+        raster_factory("ok.tif", values=2.0, subfolder="in")
+        raster_factory("vacio.tif", values=0.0, subfolder="in", nodata=None)
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        # Basta con un archivo valido para que la carpeta se considere correcta.
+        assert _process_folder(entrada, salida, "smbyc") is True
+        log = _leer_log(salida)
+        assert "Total procesados correctamente: 1" in log
+        assert "Total con errores o vacíos: 1" in log
+
+
+class TestProcessFolderNombrado:
+    """El renombrado conserva el nombre original en ambas ramas del patron."""
+
+    def test_nombre_en_formato_corto_se_conserva(self, temp_dir, raster_factory):
+        raster_factory("smbyc_2010-2012.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        _process_folder(entrada, salida, "smbyc")
+
+        assert os.path.isfile(os.path.join(salida, "smbyc_2010-2012.tif"))
+
+    def test_nombre_fuera_del_patron_tambien_se_conserva(
+        self, temp_dir, raster_factory
+    ):
+        raster_factory("nad_202401.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        _process_folder(entrada, salida, "nad")
+
+        assert os.path.isfile(os.path.join(salida, "nad_202401.tif"))
+
+
+class TestProcessFolderErrores:
+    """Errores de lectura se registran sin abortar el resto de la carpeta."""
+
+    def test_archivo_corrupto_se_registra_como_error(self, temp_dir, raster_factory):
+        raster_factory("bueno.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        with open(os.path.join(entrada, "corrupto.tif"), "wb") as f:
+            f.write(b"esto no es un geotiff")
+        salida = os.path.join(temp_dir, "out")
+
+        # El archivo valido sigue procesandose pese al corrupto.
+        assert _process_folder(entrada, salida, "smbyc") is True
+        log = _leer_log(salida)
+        assert "Error al abrir el archivo" in log
+        assert "Total procesados correctamente: 1" in log
+        assert "Total con errores o vacíos: 1" in log
+
+    def test_error_inesperado_se_captura(self, temp_dir, raster_factory, monkeypatch):
+        raster_factory("raro.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        def _explota(*args, **kwargs):
+            raise MemoryError("sin memoria")
+
+        monkeypatch.setattr(
+            "quality_control.quality_control_deforestation.rasterio.open", _explota
+        )
+
+        assert _process_folder(entrada, salida, "smbyc") is False
+        log = _leer_log(salida)
+        assert "Error inesperado: sin memoria" in log
+        assert "Total con errores o vacíos: 1" in log
+
+    def test_rasterio_io_error_se_captura(self, temp_dir, raster_factory, monkeypatch):
+        raster_factory("raro.tif", values=2.0, subfolder="in")
+        entrada = os.path.join(temp_dir, "in")
+        salida = os.path.join(temp_dir, "out")
+
+        def _explota(*args, **kwargs):
+            raise RasterioIOError("no se puede abrir")
+
+        monkeypatch.setattr(
+            "quality_control.quality_control_deforestation.rasterio.open", _explota
+        )
+
+        assert _process_folder(entrada, salida, "smbyc") is False
+        assert "Error al abrir el archivo" in _leer_log(salida)
+
+
+class TestProcessFolderLog:
+    """El log de la carpeta deja trazabilidad de cada archivo."""
+
+    def test_log_incluye_encabezado_y_resumen(self, temp_dir, raster_factory):
+        raster_factory("a.tif", values=2.0, subfolder="in")
+        raster_factory("b.tif", values=2.0, subfolder="in")
+        salida = os.path.join(temp_dir, "out")
+
+        _process_folder(os.path.join(temp_dir, "in"), salida, "smbyc")
+
+        log = _leer_log(salida)
+        assert log.startswith("LOG DE REVISIÓN DE RASTERS - ")
+        assert "--- Archivo: a.tif ---" in log
+        assert "--- Archivo: b.tif ---" in log
+        assert "Resumen:" in log
+
+    def test_copia_preserva_el_contenido_del_raster(self, temp_dir, raster_factory):
+        origen = raster_factory("datos.tif", values=2.0, subfolder="in")
+        salida = os.path.join(temp_dir, "out")
+
+        _process_folder(os.path.join(temp_dir, "in"), salida, "smbyc")
+
+        with rasterio.open(origen) as src, rasterio.open(
+            os.path.join(salida, "datos.tif")
         ) as dst:
-            dst.write(data, 1)
-        
-        # Run quality control
-        output_dir = os.path.join(temp_dir, "output")
-        result = quality_control(input_dir, output_dir, deforestation_type="annual")
-        
-        # Should succeed
-        assert result is True or result is not False
-        # Output file should exist
-        output_file = os.path.join(output_dir, "smbyc", "smbyc_2020.tif")
-        assert os.path.exists(output_file)
-    
-    def test_quality_control_empty_raster_rejected(self, temp_dir):
-        """Test that empty rasters (all zeros) are rejected."""
-        input_dir = os.path.join(temp_dir, "input")
-        smbyc_dir = os.path.join(input_dir, "smbyc")
-        os.makedirs(smbyc_dir)
-        
-        # Create empty raster
-        width, height = 32, 32
-        bounds = (-79.22, -3.41, -66.65, 12.58)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.zeros((height, width), dtype=np.float32)  # All zeros
-        
-        filepath = os.path.join(smbyc_dir, "empty_raster.tif")
-        with rasterio.open(
-            filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=np.float32, crs='EPSG:4326', transform=transform, nodata=0.0
-        ) as dst:
-            dst.write(data, 1)
-        
-        output_dir = os.path.join(temp_dir, "output")
-        result = quality_control(input_dir, output_dir, deforestation_type="annual")
-        
-        # Should return False (no valid files)
-        assert result is False
-    
-    def test_quality_control_multiple_subcategories(self, temp_dir):
-        """Test quality control with multiple folder types (smbyc, nad, atd)."""
-        input_dir = os.path.join(temp_dir, "input")
-        
-        # Create folders for each type
-        for folder_type in ["smbyc", "nad", "atd"]:
-            type_dir = os.path.join(input_dir, folder_type)
-            os.makedirs(type_dir)
-            
-            # Create valid raster in each
-            width, height = 32, 32
-            bounds = (-79.22, -3.41, -66.65, 12.58)
-            transform = from_bounds(*bounds, width, height)
-            
-            data = np.zeros((height, width), dtype=np.float32)
-            data[8:16, 8:16] = 1.0  # Some values
-            
-            filepath = os.path.join(type_dir, f"{folder_type}_test.tif")
-            with rasterio.open(
-                filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-                dtype=np.float32, crs='EPSG:4326', transform=transform, nodata=np.nan
-            ) as dst:
-                dst.write(data, 1)
-        
-        output_dir = os.path.join(temp_dir, "output")
-        result = quality_control(input_dir, output_dir, deforestation_type=None)
-        
-        # Should process all three types
-        assert os.path.exists(os.path.join(output_dir, "smbyc"))
-        assert os.path.exists(os.path.join(output_dir, "nad"))
-        assert os.path.exists(os.path.join(output_dir, "atd"))
-    
-    def test_quality_control_empty_directory(self, temp_dir):
-        """Test quality control with empty input directory."""
-        input_dir = os.path.join(temp_dir, "empty_input")
-        os.makedirs(input_dir)
-        
-        output_dir = os.path.join(temp_dir, "output")
-        result = quality_control(input_dir, output_dir, deforestation_type="annual")
-        
-        # Function returns True or False depending on implementation
-        # The key is that it doesn't crash and returns a boolean
-        assert isinstance(result, (bool, type(None), int))
-
-
-class TestRasterValidation:
-    """Tests for raster file validation logic."""
-    
-    def test_valid_raster_with_values(self, temp_dir):
-        """Test that raster with valid values passes validation."""
-        width, height = 32, 32
-        bounds = (-79.22, -3.41, -66.65, 12.58)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.array([[1, 2, 0], [2, 1, 1]], dtype=np.float32)
-        filepath = os.path.join(temp_dir, "valid.tif")
-        
-        with rasterio.open(
-            filepath, 'w', driver='GTiff', height=2, width=3, count=1,
-            dtype=np.float32, crs='EPSG:4326', transform=transform, nodata=0.0
-        ) as dst:
-            dst.write(data, 1)
-        
-        # Read and validate
-        with rasterio.open(filepath) as src:
-            array = src.read(1)
-            nodata = src.nodata
-            
-            # Check for valid values
-            if nodata is not None:
-                valores_validos = array[(array != nodata) & (array != 0)]
-            else:
-                valores_validos = array[array != 0]
-            
-            # Should have valid values
-            assert valores_validos.size > 0
-    
-    def test_empty_raster_no_values(self, temp_dir):
-        """Test that empty raster (all zeros/nodata) fails validation."""
-        width, height = 32, 32
-        bounds = (-79.22, -3.41, -66.65, 12.58)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.zeros((height, width), dtype=np.float32)
-        filepath = os.path.join(temp_dir, "empty.tif")
-        
-        with rasterio.open(
-            filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=np.float32, crs='EPSG:4326', transform=transform, nodata=0.0
-        ) as dst:
-            dst.write(data, 1)
-        
-        # Read and validate
-        with rasterio.open(filepath) as src:
-            array = src.read(1)
-            nodata = src.nodata
-            
-            if nodata is not None:
-                valores_validos = array[(array != nodata) & (array != 0)]
-            else:
-                valores_validos = array[array != 0]
-            
-            # Should have NO valid values
-            assert valores_validos.size == 0
-    
-    def test_raster_crs_detection(self, temp_dir):
-        """Test that raster CRS is correctly detected."""
-        width, height = 32, 32
-        bounds = (800000, 500000, 800960, 500960)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.ones((height, width), dtype=np.float32)
-        filepath = os.path.join(temp_dir, "crs_test.tif")
-        
-        with rasterio.open(
-            filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=np.float32, crs='EPSG:3116', transform=transform
-        ) as dst:
-            dst.write(data, 1)
-        
-        # Read and check CRS
-        with rasterio.open(filepath) as src:
-            assert src.crs is not None
-            assert str(src.crs) == "EPSG:3116"
-
-
-class TestFileOperations:
-    """Tests for file I/O operations during quality control."""
-    
-    def test_raster_file_copy(self, temp_dir):
-        """Test that raster files are correctly copied."""
-        src_file = os.path.join(temp_dir, "source.tif")
-        dest_file = os.path.join(temp_dir, "dest.tif")
-        
-        # Create source raster
-        width, height = 32, 32
-        bounds = (-79.22, -3.41, -66.65, 12.58)
-        transform = from_bounds(*bounds, width, height)
-        
-        data = np.ones((height, width), dtype=np.float32)
-        with rasterio.open(
-            src_file, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=np.float32, crs='EPSG:4326', transform=transform
-        ) as dst:
-            dst.write(data, 1)
-        
-        # Copy file
-        shutil.copy(src_file, dest_file)
-        
-        # Verify copy
-        assert os.path.exists(dest_file)
-        with rasterio.open(dest_file) as src:
-            copied_data = src.read(1)
-            assert np.array_equal(copied_data, data)
-    
-    def test_directory_structure_creation(self, temp_dir):
-        """Test that correct directory structure is created."""
-        base_dir = os.path.join(temp_dir, "base")
-        subdirs = ["smbyc", "nad", "atd"]
-        
-        # Create structure
-        for subdir in subdirs:
-            full_path = os.path.join(base_dir, subdir)
-            os.makedirs(full_path, exist_ok=True)
-        
-        # Verify all created
-        for subdir in subdirs:
-            full_path = os.path.join(base_dir, subdir)
-            assert os.path.isdir(full_path)
-    
-    def test_file_rename_patterns(self, temp_dir):
-        """Test file renaming patterns for standardization."""
-        # Original filename with various formats
-        filenames = [
-            "smbyc_2010-2012.tif",
-            "smbyc_2013.tif",
-            "nad_202401.tif",
-        ]
-        
-        # Verify all files can be created and renamed
-        for old_name in filenames:
-            old_path = os.path.join(temp_dir, old_name)
-            new_name = f"standardized_{old_name}"
-            new_path = os.path.join(temp_dir, new_name)
-            
-            # Create dummy file
-            Path(old_path).touch()
-            
-            # Rename
-            shutil.move(old_path, new_path)
-            
-            # Verify
-            assert os.path.exists(new_path)
-            assert not os.path.exists(old_path)
-
-
-class TestRasterIOErrors:
-    """Tests for error handling during raster I/O."""
-    
-    def test_corrupted_file_handling(self, temp_dir):
-        """Test handling of corrupted/invalid raster files."""
-        corrupted_file = os.path.join(temp_dir, "corrupted.tif")
-        
-        # Write invalid data
-        with open(corrupted_file, 'w') as f:
-            f.write("This is not a valid GeoTIFF")
-        
-        # Try to open - should raise error
-        with pytest.raises(Exception):  # rasterio.errors.RasterioIOError
-            with rasterio.open(corrupted_file) as src:
-                src.read(1)
-    
-    def test_nonexistent_file_handling(self):
-        """Test handling of non-existent files."""
-        nonexistent = "/path/that/does/not/exist/file.tif"
-        
-        with pytest.raises(Exception):  # FileNotFoundError or similar
-            with rasterio.open(nonexistent) as src:
-                src.read(1)
-    
-    def test_read_only_file_handling(self, temp_dir):
-        """Test handling of read-only files during copy."""
-        src_file = os.path.join(temp_dir, "readonly.tif")
-        
-        # Create file
-        Path(src_file).touch()
-        
-        # Make read-only (on Windows)
-        os.chmod(src_file, 0o444)
-        
-        try:
-            # Should still be readable
-            with open(src_file, 'r') as f:
-                pass  # Read is OK
-        finally:
-            # Clean up permissions
-            os.chmod(src_file, 0o644)
-
-
-class TestSubfolderProcessing:
-    """Tests for processing different subfolder types."""
-    
-    def test_process_smbyc_folder(self, temp_dir):
-        """Test processing SMBYC folder specifically."""
-        smbyc_dir = os.path.join(temp_dir, "smbyc")
-        os.makedirs(smbyc_dir)
-        
-        # Create multiple SMBYC files
-        for year in [2020, 2021, 2022]:
-            width, height = 32, 32
-            bounds = (-79.22, -3.41, -66.65, 12.58)
-            transform = from_bounds(*bounds, width, height)
-            
-            data = np.ones((height, width), dtype=np.float32) * year
-            filepath = os.path.join(smbyc_dir, f"smbyc_{year}.tif")
-            
-            with rasterio.open(
-                filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-                dtype=np.float32, crs='EPSG:4326', transform=transform
-            ) as dst:
-                dst.write(data, 1)
-        
-        # Count files
-        files = [f for f in os.listdir(smbyc_dir) if f.endswith('.tif')]
-        assert len(files) == 3
-    
-    def test_process_nad_atd_folders(self, temp_dir):
-        """Test processing NAD/ATD folders with quarterly data."""
-        for folder_type in ["nad", "atd"]:
-            type_dir = os.path.join(temp_dir, folder_type)
-            os.makedirs(type_dir)
-            
-            # Create quarterly files for one year
-            for quarter in range(1, 5):
-                width, height = 32, 32
-                bounds = (-79.22, -3.41, -66.65, 12.58)
-                transform = from_bounds(*bounds, width, height)
-                
-                data = np.ones((height, width), dtype=np.float32) * quarter
-                filepath = os.path.join(type_dir, f"{folder_type}_202401.tif")
-                
-                with rasterio.open(
-                    filepath, 'w', driver='GTiff', height=height, width=width, count=1,
-                    dtype=np.float32, crs='EPSG:4326', transform=transform
-                ) as dst:
-                    dst.write(data, 1)
-            
-            # Verify folder exists
-            assert os.path.isdir(type_dir)
+            assert np.array_equal(src.read(1), dst.read(1))
+            assert src.crs == dst.crs
+            assert src.transform == dst.transform
