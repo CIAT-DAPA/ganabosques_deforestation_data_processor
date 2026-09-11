@@ -16,8 +16,10 @@ from ganabosques_orm.enums.deforestationsource import DeforestationSource
 from ganabosques_orm.enums.deforestationtype import DeforestationType
 from save_deforestation import process_geoserver_mosaics
 from save_deforestation.save_deforestation import (
+    PROPS_BY_TYPE,
     GeoserverClient,
     _check_external_properties,
+    _props_dir_for_type,
     _create_dirs,
     _ensure_rest_url,
     _list_tifs,
@@ -227,6 +229,78 @@ class TestCheckExternalProperties:
         _check_external_properties(carpeta)
 
         assert "No pude inferir el formato" in capsys.readouterr().out
+
+
+class TestPropsDirForType:
+    """
+    Cada tipo resuelve su carpeta de properties de forma determinista.
+
+    Regresion: antes la carpeta se buscaba recorriendo ``os.listdir`` y
+    quedandose con la primera cuyo nombre contuviera el source o el tipo. Para
+    nad/atd coincidian las dos carpetas ('properties_nad_atd' por el tipo y
+    'properties_smbyc' por el source), asi que el resultado dependia del orden
+    del sistema de archivos: alfabetico en Windows, por hash en Linux.
+    """
+
+    @pytest.mark.parametrize(
+        "tipo, carpeta_esperada",
+        [
+            ("annual", "properties_smbyc"),
+            ("cumulative", "properties_smbyc"),
+            ("nad", "properties_nad_atd"),
+            ("atd", "properties_nad_atd"),
+        ],
+    )
+    def test_mapeo_por_tipo(self, temp_dir, tipo, carpeta_esperada):
+        for nombre in ("properties_smbyc", "properties_nad_atd"):
+            _crear_props(os.path.join(temp_dir, nombre))
+
+        resultado = _props_dir_for_type(temp_dir, tipo)
+
+        assert os.path.basename(resultado) == carpeta_esperada
+
+    def test_el_orden_del_sistema_de_archivos_no_influye(self, temp_dir, monkeypatch):
+        for nombre in ("properties_smbyc", "properties_nad_atd"):
+            _crear_props(os.path.join(temp_dir, nombre))
+
+        # Aunque listdir devuelva primero la carpeta de SMByC, nad debe seguir
+        # resolviendo a properties_nad_atd.
+        monkeypatch.setattr(
+            os, "listdir", lambda p: ["properties_smbyc", "properties_nad_atd"]
+        )
+
+        assert os.path.basename(_props_dir_for_type(temp_dir, "nad")) == (
+            "properties_nad_atd"
+        )
+
+    def test_el_mapeo_cubre_los_cuatro_tipos(self):
+        assert set(PROPS_BY_TYPE) == {"annual", "cumulative", "nad", "atd"}
+
+    def test_tipo_sin_carpeta_asignada(self, temp_dir):
+        with pytest.raises(
+            FileNotFoundError, match="No hay carpeta de propiedades definida"
+        ):
+            _props_dir_for_type(temp_dir, "inventado")
+
+    def test_carpeta_asignada_que_no_existe_en_disco(self, temp_dir):
+        with pytest.raises(
+            FileNotFoundError, match="No se encontró la carpeta de propiedades"
+        ):
+            _props_dir_for_type(temp_dir, "annual")
+
+    def test_carpeta_sin_los_properties_requeridos(self, temp_dir):
+        os.makedirs(os.path.join(temp_dir, "properties_smbyc"))
+
+        with pytest.raises(FileNotFoundError, match="indexer.properties no encontrado"):
+            _props_dir_for_type(temp_dir, "annual")
+
+    def test_las_carpetas_reales_del_repositorio_son_validas(self):
+        utils_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "utils"
+        )
+
+        for tipo in PROPS_BY_TYPE:
+            assert os.path.isdir(_props_dir_for_type(utils_dir, tipo))
 
 
 class TestZipTifsAndProps:
@@ -907,21 +981,44 @@ class TestProcessGeoserverMosaics:
         assert os.path.isdir(os.path.join(salida_paso4, "tmp_mosaic"))
         assert os.path.isdir(os.path.join(salida_paso4, "zip_mosaic"))
 
-    def test_usa_las_properties_reales_del_repositorio(
-        self, salida_paso4, geo_doble, mongo_doble, capsys
+    @pytest.mark.parametrize(
+        "tipo, carpeta_esperada",
+        [
+            ("annual", "properties_smbyc"),
+            ("cumulative", "properties_smbyc"),
+            ("nad", "properties_nad_atd"),
+            ("atd", "properties_nad_atd"),
+        ],
+    )
+    def test_cada_tipo_usa_su_carpeta_de_properties(
+        self, salida_paso4, geo_doble, mongo_doble, tipo, carpeta_esperada
     ):
-        process_geoserver_mosaics(salida_paso4, "smbyc", deforestation_type="annual")
+        process_geoserver_mosaics(salida_paso4, "smbyc", deforestation_type=tipo)
 
-        salida = capsys.readouterr().out
-        assert "PROPERTIES externas:" in salida
-        assert "properties_smbyc" in salida
+        # create_mosaic(store_name, rasters_dir, props_dir, tmp_dir, zip_dir)
+        props_dir = geo_doble.instancia.create_mosaic.call_args.args[2]
+        assert os.path.basename(props_dir) == carpeta_esperada
 
-    def test_tipos_nad_atd_usan_las_properties_trimestrales(
-        self, salida_paso4, geo_doble, mongo_doble, capsys
+    def test_sin_tipo_cada_uno_recibe_sus_propias_properties(
+        self, salida_paso4, geo_doble, mongo_doble
     ):
-        process_geoserver_mosaics(salida_paso4, "smbyc", deforestation_type="nad")
+        """
+        Regresion: props_dir se resolvia una sola vez fuera del bucle, asi que
+        los cuatro tipos compartian carpeta y al menos dos quedaban con el
+        timeregex equivocado.
+        """
+        process_geoserver_mosaics(salida_paso4, "smbyc")
 
-        assert "properties_nad_atd" in capsys.readouterr().out
+        usadas = [
+            os.path.basename(c.args[2])
+            for c in geo_doble.instancia.create_mosaic.call_args_list
+        ]
+        assert usadas == [
+            "properties_smbyc",
+            "properties_smbyc",
+            "properties_nad_atd",
+            "properties_nad_atd",
+        ]
 
     @pytest.mark.parametrize(
         "clave", ["URL_GEO", "GEO_USER", "GEO_PWD", "GEO_WORKSPACE"]
@@ -943,11 +1040,17 @@ class TestProcessGeoserverMosaics:
     def test_sin_carpeta_de_properties_lanza_file_not_found(
         self, salida_paso4, geo_doble, mongo_doble, monkeypatch
     ):
-        # Apunta la busqueda de properties a un directorio sin carpetas validas.
-        monkeypatch.setattr(os.path, "isdir", lambda p: False)
+        isdir_real = os.path.isdir
+
+        def _sin_properties(ruta):
+            if "properties_" in str(ruta):
+                return False
+            return isdir_real(ruta)
+
+        monkeypatch.setattr(os.path, "isdir", _sin_properties)
 
         with pytest.raises(
-            FileNotFoundError, match="No se encontró carpeta de propiedades"
+            FileNotFoundError, match="No se encontró la carpeta de propiedades"
         ):
             process_geoserver_mosaics(salida_paso4, "smbyc", deforestation_type="annual")
 

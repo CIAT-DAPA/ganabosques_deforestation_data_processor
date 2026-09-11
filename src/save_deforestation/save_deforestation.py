@@ -254,6 +254,39 @@ def _parse_period_from_filename(filename: str) -> Tuple[date, date]:
 
     raise ValueError(f"No se pudo extraer rango de fechas desde '{base}'")
 
+PROPS_BY_TYPE = {
+    "annual": "properties_smbyc",
+    "cumulative": "properties_smbyc",
+    "nad": "properties_nad_atd",
+    "atd": "properties_nad_atd",
+}
+
+
+def _props_dir_for_type(utils_dir: str, type_key: str) -> str:
+    """
+    Devuelve la carpeta de properties que corresponde a ``type_key``.
+
+    Lanza ``FileNotFoundError`` si el tipo no tiene carpeta asignada, si esa
+    carpeta no existe en disco, o si le falta alguno de los dos .properties.
+    """
+    folder_name = PROPS_BY_TYPE.get(type_key)
+    if not folder_name:
+        raise FileNotFoundError(
+            f"No hay carpeta de propiedades definida para el tipo '{type_key}'. "
+            f"Tipos con properties: {sorted(PROPS_BY_TYPE)}"
+        )
+
+    folder_path = os.path.join(utils_dir, folder_name)
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(
+            f"No se encontró la carpeta de propiedades '{folder_name}' "
+            f"(tipo '{type_key}') en {utils_dir}."
+        )
+
+    _check_external_properties(folder_path)
+    return folder_path
+
+
 def _save_mosaic_records_to_mongo(rasters_dir: str, store_name: str, source_value: str):
     """
     Recorre los TIF de rasters_dir y hace upsert en colección 'deforestation' usando MongoEngine ORM.
@@ -531,27 +564,6 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str, defor
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         utils_dir = os.path.normpath(os.path.join(BASE_DIR, "..", "utils"))
 
-        # Buscar carpeta de propiedades para esta fuente
-        # (ej: properties_smbyc, properties_nad_atd)
-        props_dir = None
-        if os.path.isdir(utils_dir):
-            for folder in os.listdir(utils_dir):
-                folder_path = os.path.join(utils_dir, folder)
-                if os.path.isdir(folder_path) and folder.startswith("properties_"):
-                    # Intenta detectar si contiene el source o tipos relacionados
-                    if src_lower in folder or any(t in folder for t in types_to_process):
-                        props_dir = folder_path
-                        break
-
-        if not props_dir:
-            raise FileNotFoundError(
-                f"No se encontró carpeta de propiedades para source='{src_lower}' en {utils_dir}. "
-                "Esperaba una carpeta del tipo 'properties_*' compatible."
-            )
-
-        _check_external_properties(props_dir)
-        log_print(logger, f"[GeoServer] PROPERTIES externas: {props_dir}")
-
         tmp_root = os.path.join(output_path_deforestation, "tmp_mosaic")
         zip_root = os.path.join(output_path_deforestation, "zip_mosaic")
         _create_dirs(tmp_root, zip_root)
@@ -575,6 +587,9 @@ def process_geoserver_mosaics(output_path_deforestation: str, source: str, defor
                 continue
 
             log_print(logger, f"[GeoServer] Procesando tipo: {type_key.upper()} ({store_name})")
+
+            props_dir = _props_dir_for_type(utils_dir, type_key)
+            log_print(logger, f"[GeoServer] PROPERTIES externas ({type_key}): {props_dir}")
 
             store_obj = geo.get_store(store_name)
             if store_obj:
